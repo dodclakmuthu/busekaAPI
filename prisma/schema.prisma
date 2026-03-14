@@ -1,0 +1,394 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["busapp"]
+}
+
+enum CompanyUserRole {
+  OWNER
+  MANAGER
+
+  @@schema("busapp")
+}
+
+enum StaffRoleType {
+  DRIVER
+  CONDUCTOR
+  DRIVER_CONDUCTOR
+
+  @@schema("busapp")
+}
+
+enum EmploymentType {
+  PERMANENT
+  TEMPORARY
+  DAILY_HIRE
+  CONTRACT
+
+  @@schema("busapp")
+}
+
+enum BusStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+
+  @@schema("busapp")
+}
+
+enum RouteDirection {
+  UP
+  DOWN
+
+  @@schema("busapp")
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  STARTED
+  COMPLETED
+  CANCELLED
+
+  @@schema("busapp")
+}
+
+enum TripStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+
+  @@schema("busapp")
+}
+
+enum ExpenseCategory {
+  DIESEL
+  EXPRESSWAY
+  RUNNER
+  PARKING
+  MEAL_ALLOWANCE
+  REPAIR
+  OTHER
+
+  @@schema("busapp")
+}
+
+enum DailySummaryStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+
+  @@schema("busapp")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  fullName     String
+  mobileNumber String   @unique
+  email        String?  @unique
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedCompanies     Company[]       @relation("CompanyOwner")
+  companyUsers       CompanyUser[]
+  assignmentsCreated BusAssignment[] @relation("AssignedByUser")
+  busPinsCreated     BusAccessPin[]  @relation("PinCreatedByUser")
+  summariesApproved  DailySummary[]  @relation("SummaryApprovedByUser")
+
+  @@schema("busapp")
+}
+
+model Company {
+  id           String   @id @default(uuid())
+  name         String
+  ownerUserId  String
+  businessType String   @default("individual_owner")
+  mobileNumber String?
+  address      String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  owner         User            @relation("CompanyOwner", fields: [ownerUserId], references: [id])
+  companyUsers  CompanyUser[]
+  staffProfiles StaffProfile[]
+  routes        Route[]
+  buses         Bus[]
+  assignments   BusAssignment[]
+  trips         Trip[]
+  summaries     DailySummary[]
+
+  @@schema("busapp")
+}
+
+model CompanyUser {
+  id        String          @id @default(uuid())
+  companyId String
+  userId    String
+  role      CompanyUserRole
+  isActive  Boolean         @default(true)
+  createdAt DateTime        @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([companyId])
+  @@index([userId])
+  @@schema("busapp")
+}
+
+model StaffProfile {
+  id             String         @id @default(uuid())
+  companyId      String
+  fullName       String
+  mobileNumber   String?
+  nicNumber      String?
+  roleType       StaffRoleType
+  employmentType EmploymentType @default(PERMANENT)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  company              Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  driverAssignments    BusAssignment[] @relation("DriverAssignment")
+  conductorAssignments BusAssignment[] @relation("ConductorAssignment")
+
+  @@index([companyId])
+  @@index([roleType])
+  @@index([isActive])
+  @@schema("busapp")
+}
+
+model Route {
+  id            String   @id @default(uuid())
+  companyId     String
+  routeCode     String?
+  routeName     String
+  startLocation String
+  endLocation   String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  stops   RouteStop[]
+  buses   Bus[]
+  trips   Trip[]
+
+  @@index([companyId])
+  @@index([isActive])
+  @@schema("busapp")
+}
+
+model RouteStop {
+  id        String         @id @default(uuid())
+  routeId   String
+  direction RouteDirection
+  stopName  String
+  stopOrder Int
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  route      Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  tripStarts Trip[] @relation("TripStartStop")
+  tripEnds   Trip[] @relation("TripEndStop")
+
+  @@unique([routeId, direction, stopOrder])
+  @@unique([routeId, direction, stopName])
+  @@index([routeId])
+  @@index([direction])
+  @@index([isActive])
+  @@schema("busapp")
+}
+
+model Bus {
+  id                 String    @id @default(uuid())
+  companyId          String
+  registrationNumber String
+  busName            String?
+  ntcPermitNumber    String?
+  routeId            String?
+  seatCount          Int?
+  status             BusStatus @default(ACTIVE)
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  company     Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  route       Route?          @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  assignments BusAssignment[]
+  accessPins  BusAccessPin[]
+  trips       Trip[]
+  summaries   DailySummary[]
+
+  @@unique([companyId, registrationNumber])
+  @@index([companyId])
+  @@index([routeId])
+  @@index([status])
+  @@index([isActive])
+  @@schema("busapp")
+}
+
+model BusAssignment {
+  id               String           @id @default(uuid())
+  companyId        String
+  busId            String
+  assignmentDate   DateTime
+  driverStaffId    String?
+  conductorStaffId String?
+  assignedByUserId String
+  status           AssignmentStatus @default(ASSIGNED)
+  notes            String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bus        Bus            @relation(fields: [busId], references: [id], onDelete: Cascade)
+  driver     StaffProfile?  @relation("DriverAssignment", fields: [driverStaffId], references: [id], onDelete: SetNull)
+  conductor  StaffProfile?  @relation("ConductorAssignment", fields: [conductorStaffId], references: [id], onDelete: SetNull)
+  assignedBy User           @relation("AssignedByUser", fields: [assignedByUserId], references: [id], onDelete: Restrict)
+  accessPins BusAccessPin[]
+  trips      Trip[]
+  summaries  DailySummary[]
+
+  @@unique([busId, assignmentDate])
+  @@index([companyId])
+  @@index([busId])
+  @@index([assignmentDate])
+  @@index([driverStaffId])
+  @@index([conductorStaffId])
+  @@index([status])
+  @@schema("busapp")
+}
+
+model BusAccessPin {
+  id              String    @id @default(uuid())
+  busId           String
+  assignmentId    String?
+  pinHash         String
+  isActive        Boolean   @default(true)
+  validFrom       DateTime  @default(now())
+  validUntil      DateTime?
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  bus        Bus            @relation(fields: [busId], references: [id], onDelete: Cascade)
+  assignment BusAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  createdBy  User           @relation("PinCreatedByUser", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([busId])
+  @@index([assignmentId])
+  @@index([isActive])
+  @@index([validFrom])
+  @@index([validUntil])
+  @@schema("busapp")
+}
+
+model Trip {
+  id           String         @id @default(uuid())
+  companyId    String
+  busId        String
+  assignmentId String?
+  routeId      String?
+  tripDate     DateTime
+  tripNumber   Int
+  direction    RouteDirection
+  startStopId  String?
+  endStopId    String?
+  startedAt    DateTime?
+  endedAt      DateTime?
+  status       TripStatus     @default(NOT_STARTED)
+  createdVia   String         @default("bus_app")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bus        Bus            @relation(fields: [busId], references: [id], onDelete: Cascade)
+  assignment BusAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  route      Route?         @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  startStop  RouteStop?     @relation("TripStartStop", fields: [startStopId], references: [id], onDelete: SetNull)
+  endStop    RouteStop?     @relation("TripEndStop", fields: [endStopId], references: [id], onDelete: SetNull)
+  incomes    TripIncome[]
+  expenses   TripExpense[]
+
+  @@unique([busId, tripDate, tripNumber])
+  @@index([companyId])
+  @@index([busId])
+  @@index([assignmentId])
+  @@index([routeId])
+  @@index([tripDate])
+  @@index([status])
+  @@index([direction])
+  @@schema("busapp")
+}
+
+model TripIncome {
+  id            String   @id @default(uuid())
+  tripId        String
+  amount        Decimal  @db.Decimal(12, 2)
+  note          String?
+  enteredByType String   @default("bus_app")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@schema("busapp")
+}
+
+model TripExpense {
+  id              String          @id @default(uuid())
+  tripId          String
+  expenseCategory ExpenseCategory
+  amount          Decimal         @db.Decimal(12, 2)
+  note            String?
+  enteredByType   String          @default("bus_app")
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@index([expenseCategory])
+  @@schema("busapp")
+}
+
+model DailySummary {
+  id               String             @id @default(uuid())
+  companyId        String
+  busId            String
+  assignmentId     String?
+  summaryDate      DateTime
+  totalTrips       Int                @default(0)
+  totalIncome      Decimal            @default(0) @db.Decimal(12, 2)
+  totalExpenses    Decimal            @default(0) @db.Decimal(12, 2)
+  netAmount        Decimal            @default(0) @db.Decimal(12, 2)
+  status           DailySummaryStatus @default(DRAFT)
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  approvedByUserId String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bus        Bus            @relation(fields: [busId], references: [id], onDelete: Cascade)
+  assignment BusAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  approvedBy User?          @relation("SummaryApprovedByUser", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([busId, summaryDate])
+  @@index([companyId])
+  @@index([busId])
+  @@index([assignmentId])
+  @@index([summaryDate])
+  @@index([status])
+  @@schema("busapp")
+}
