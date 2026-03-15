@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBusDto } from './dto/create-bus.dto';
 import { UpdateBusDto } from './dto/update-bus.dto';
+import { BusStatus } from '@prisma/client';
 
 @Injectable()
 export class BusService {
@@ -30,6 +31,28 @@ export class BusService {
     });
     if (!route) {
       throw new NotFoundException(`Route ${routeId} not found in your company`);
+    }
+  }
+
+  private async validateDefaultDriver(staffId: string, companyId: string) {
+    const staff = await this.prisma.staffProfile.findFirst({
+      where: { id: staffId, companyId, isActive: true },
+      select: { id: true, roleType: true },
+    });
+    if (!staff) throw new NotFoundException(`Staff ${staffId} not found in your company`);
+    if (staff.roleType !== 'DRIVER' && staff.roleType !== 'DRIVER_CONDUCTOR') {
+      throw new ConflictException('Default driver must be DRIVER or DRIVER_CONDUCTOR');
+    }
+  }
+
+  private async validateDefaultConductor(staffId: string, companyId: string) {
+    const staff = await this.prisma.staffProfile.findFirst({
+      where: { id: staffId, companyId, isActive: true },
+      select: { id: true, roleType: true },
+    });
+    if (!staff) throw new NotFoundException(`Staff ${staffId} not found in your company`);
+    if (staff.roleType !== 'CONDUCTOR' && staff.roleType !== 'DRIVER_CONDUCTOR') {
+      throw new ConflictException('Default conductor must be CONDUCTOR or DRIVER_CONDUCTOR');
     }
   }
 
@@ -106,17 +129,70 @@ export class BusService {
 
     if (dto.routeId) await this.validateRoute(dto.routeId, companyId);
 
-    const bus = await this.prisma.bus.update({
-      where: { id: busId },
-      data: {
-        ...(dto.registrationNumber !== undefined && { registrationNumber: dto.registrationNumber }),
-        ...(dto.busName !== undefined && { busName: dto.busName }),
-        ...(dto.ntcPermitNumber !== undefined && { ntcPermitNumber: dto.ntcPermitNumber }),
-        ...(dto.routeId !== undefined && { routeId: dto.routeId }),
-        ...(dto.seatCount !== undefined && { seatCount: dto.seatCount }),
-        ...(dto.status !== undefined && { status: dto.status }),
-      },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+    if (dto.defaultDriverStaffId) {
+      await this.validateDefaultDriver(dto.defaultDriverStaffId, companyId);
+    }
+
+    if (dto.defaultConductorStaffId) {
+      await this.validateDefaultConductor(dto.defaultConductorStaffId, companyId);
+    }
+
+    const updateData = {
+      ...(dto.registrationNumber !== undefined && { registrationNumber: dto.registrationNumber }),
+      ...(dto.busName !== undefined && { busName: dto.busName }),
+      ...(dto.ntcPermitNumber !== undefined && { ntcPermitNumber: dto.ntcPermitNumber }),
+      ...(dto.routeId !== undefined && { routeId: dto.routeId }),
+      ...(dto.seatCount !== undefined && { seatCount: dto.seatCount }),
+      ...(dto.status !== undefined && { status: dto.status }),
+      ...(dto.defaultDriverStaffId !== undefined && { defaultDriverStaffId: dto.defaultDriverStaffId }),
+      ...(dto.defaultConductorStaffId !== undefined && { defaultConductorStaffId: dto.defaultConductorStaffId }),
+    };
+
+    const include = { route: { select: { id: true, routeName: true, routeCode: true } } };
+
+    const bus = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.bus.update({
+        where: { id: busId },
+        data: updateData,
+        include,
+      });
+
+      if (dto.status === 'SOLD') {
+        await tx.busAccessPin.updateMany({
+          where: { busId, isActive: true },
+          data: { isActive: false, validUntil: new Date() },
+        });
+      }
+
+      return updated;
+    });
+
+    return { bus };
+  }
+
+  /** PATCH /buses/:id/status */
+  async updateStatus(companyId: string, busId: string, status: BusStatus) {
+    await this.resolveBus(busId, companyId);
+
+    const now = new Date();
+
+    const bus = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.bus.update({
+        where: { id: busId },
+        data: { status },
+        include: {
+          route: { select: { id: true, routeName: true, routeCode: true } },
+        },
+      });
+
+      if (status === 'SOLD') {
+        await tx.busAccessPin.updateMany({
+          where: { busId, isActive: true },
+          data: { isActive: false, validUntil: now },
+        });
+      }
+
+      return updated;
     });
 
     return { bus };

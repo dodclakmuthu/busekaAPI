@@ -6,19 +6,36 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { SafeUser } from '../auth/auth.types';
 import { CompanyGuard } from '../company/guards/company.guard';
 import { GetCompany } from '../company/decorators/get-company.decorator';
+import { CompanyRoles } from '../company/decorators/company-roles.decorator';
+import { CompanyRolesGuard } from '../company/guards/company-roles.guard';
 import { BusService } from './bus.service';
 import { CreateBusDto } from './dto/create-bus.dto';
 import { UpdateBusDto } from './dto/update-bus.dto';
+import { BusPinService } from './bus-pin.service';
+import { SetBusPinDto } from './dto/set-bus-pin.dto';
+import { UpdateBusStatusDto } from './dto/update-bus-status.dto';
+import { CompanyUserRole } from '@prisma/client';
+
+type AuthedCompanyRequest = Request & {
+  user: SafeUser;
+  company?: { id: string; role: CompanyUserRole };
+};
 
 @UseGuards(JwtAuthGuard, CompanyGuard)
 @Controller('buses')
 export class BusController {
-  constructor(private readonly busService: BusService) {}
+  constructor(
+    private readonly busService: BusService,
+    private readonly busPinService: BusPinService,
+  ) {}
 
   /** POST /buses */
   @Post()
@@ -49,5 +66,43 @@ export class BusController {
     @Body() dto: UpdateBusDto,
   ) {
     return this.busService.update(company.id, id, dto);
+  }
+
+  /** POST /buses/:id/pin */
+  @UseGuards(CompanyRolesGuard)
+  @CompanyRoles(CompanyUserRole.OWNER, CompanyUserRole.MANAGER)
+  @Post(':id/pin')
+  setPin(
+    @GetCompany() company: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetBusPinDto,
+    @Req() req: AuthedCompanyRequest,
+  ) {
+    return this.busPinService.setPin(company.id, id, req.user.id, dto);
+  }
+
+  /** PATCH /buses/:id/pin/reset */
+  @UseGuards(CompanyRolesGuard)
+  @CompanyRoles(CompanyUserRole.OWNER, CompanyUserRole.MANAGER)
+  @Patch(':id/pin/reset')
+  resetPin(
+    @GetCompany() company: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetBusPinDto,
+    @Req() req: AuthedCompanyRequest,
+  ) {
+    return this.busPinService.resetPin(company.id, id, req.user.id, dto);
+  }
+
+  /** PATCH /buses/:id/status */
+  @UseGuards(CompanyRolesGuard)
+  @CompanyRoles(CompanyUserRole.OWNER, CompanyUserRole.MANAGER)
+  @Patch(':id/status')
+  updateStatus(
+    @GetCompany() company: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBusStatusDto,
+  ) {
+    return this.busService.updateStatus(company.id, id, dto.status);
   }
 }

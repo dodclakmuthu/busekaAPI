@@ -29,4 +29,12 @@ export class UpdateBusDto {
   @IsOptional()
   @IsEnum(BusStatus)
   status?: BusStatus;
+
+  @IsOptional()
+  @IsUUID()
+  defaultDriverStaffId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  defaultConductorStaffId?: string;
 }

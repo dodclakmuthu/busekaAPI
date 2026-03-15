@@ -35,6 +35,7 @@ enum BusStatus {
   ACTIVE
   INACTIVE
   MAINTENANCE
+  SOLD
 
   @@schema("busapp")
 }
@@ -158,6 +159,8 @@ model StaffProfile {
   company              Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   driverAssignments    BusAssignment[] @relation("DriverAssignment")
   conductorAssignments BusAssignment[] @relation("ConductorAssignment")
+  defaultDriverBuses    Bus[]           @relation("BusDefaultDriver")
+  defaultConductorBuses Bus[]           @relation("BusDefaultConductor")
 
   @@index([companyId])
   @@index([roleType])
@@ -217,12 +220,16 @@ model Bus {
   routeId            String?
   seatCount          Int?
   status             BusStatus @default(ACTIVE)
+  defaultDriverStaffId    String?
+  defaultConductorStaffId String?
   isActive           Boolean   @default(true)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   company     Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   route       Route?          @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  defaultDriver    StaffProfile? @relation("BusDefaultDriver", fields: [defaultDriverStaffId], references: [id], onDelete: SetNull)
+  defaultConductor StaffProfile? @relation("BusDefaultConductor", fields: [defaultConductorStaffId], references: [id], onDelete: SetNull)
   assignments BusAssignment[]
   accessPins  BusAccessPin[]
   trips       Trip[]
@@ -232,6 +239,8 @@ model Bus {
   @@index([companyId])
   @@index([routeId])
   @@index([status])
+  @@index([defaultDriverStaffId])
+  @@index([defaultConductorStaffId])
   @@index([isActive])
   @@schema("busapp")
 }
