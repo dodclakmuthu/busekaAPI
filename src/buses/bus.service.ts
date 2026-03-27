@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -6,7 +7,17 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBusDto } from './dto/create-bus.dto';
 import { UpdateBusDto } from './dto/update-bus.dto';
-import { BusStatus } from '@prisma/client';
+import { BusStatus, Prisma } from '@prisma/client';
+import { getBusinessDayRangeUtc } from '../common/business-day';
+import {
+  decimalToNumber,
+  mapExpenseCategoryToDashboard,
+  mapExtraIncomeCategoryToDashboard,
+  normalizeExpenseCategory,
+  normalizeExtraIncomeCategory,
+} from '../common/finance';
+import { CreateOperationalExpenseDto } from './dto/create-operational-expense.dto';
+import { CreateOperationalIncomeDto } from './dto/create-operational-income.dto';
 
 @Injectable()
 export class BusService {
@@ -92,6 +103,16 @@ export class BusService {
   async findAll(companyId: string) {
     const buses = await this.prisma.bus.findMany({
       where: { companyId, isActive: true },
+      orderBy: { createdAt: 'desc' },
+      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+    });
+    return { buses };
+  }
+
+  /** GET /buses/active - active/available buses only (status=ACTIVE). */
+  async findActive(companyId: string) {
+    const buses = await this.prisma.bus.findMany({
+      where: { companyId, isActive: true, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
       include: { route: { select: { id: true, routeName: true, routeCode: true } } },
     });
@@ -196,5 +217,99 @@ export class BusService {
     });
 
     return { bus };
+  }
+
+  // ── Operational (non-trip) finance records ───────────────────────────────
+
+  async addOperationalExpense(companyId: string, busId: string, dto: CreateOperationalExpenseDto) {
+    await this.resolveBus(busId, companyId);
+
+    const amount = Number(dto.amount);
+    if (!isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Amount must be a positive number');
+    }
+
+    const dayRange = dto.date
+      ? getBusinessDayRangeUtc({ date: dto.date })
+      : getBusinessDayRangeUtc({ today: true });
+    if (!dayRange) throw new BadRequestException('Invalid date');
+
+    const created = await this.prisma.operationalExpense.create({
+      data: {
+        companyId,
+        busId,
+        recordDate: dayRange.start,
+        category: normalizeExpenseCategory(dto.category),
+        amount: new Prisma.Decimal(amount),
+        note: dto.note?.trim() ?? null,
+        enteredByType: 'dashboard',
+      },
+      select: {
+        id: true,
+        recordDate: true,
+        category: true,
+        amount: true,
+        note: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      operationalExpense: {
+        id: created.id,
+        busId,
+        date: created.recordDate.toISOString().slice(0, 10),
+        category: mapExpenseCategoryToDashboard(created.category),
+        amount: decimalToNumber(created.amount),
+        note: created.note ?? null,
+        timestamp: created.createdAt.toISOString(),
+      },
+    };
+  }
+
+  async addOperationalIncome(companyId: string, busId: string, dto: CreateOperationalIncomeDto) {
+    await this.resolveBus(busId, companyId);
+
+    const amount = Number(dto.amount);
+    if (!isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Amount must be a positive number');
+    }
+
+    const dayRange = dto.date
+      ? getBusinessDayRangeUtc({ date: dto.date })
+      : getBusinessDayRangeUtc({ today: true });
+    if (!dayRange) throw new BadRequestException('Invalid date');
+
+    const created = await this.prisma.operationalIncome.create({
+      data: {
+        companyId,
+        busId,
+        recordDate: dayRange.start,
+        category: normalizeExtraIncomeCategory(dto.category),
+        amount: new Prisma.Decimal(amount),
+        note: dto.note?.trim() ?? null,
+        enteredByType: 'dashboard',
+      },
+      select: {
+        id: true,
+        recordDate: true,
+        category: true,
+        amount: true,
+        note: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      operationalIncome: {
+        id: created.id,
+        busId,
+        date: created.recordDate.toISOString().slice(0, 10),
+        category: mapExtraIncomeCategoryToDashboard(created.category),
+        amount: decimalToNumber(created.amount),
+        note: created.note ?? null,
+        timestamp: created.createdAt.toISOString(),
+      },
+    };
   }
 }

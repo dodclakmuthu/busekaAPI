@@ -77,6 +77,14 @@ enum ExpenseCategory {
   @@schema("busapp")
 }
 
+enum ExtraIncomeCategory {
+  PARCEL
+  BAGGAGE
+  OTHER
+
+  @@schema("busapp")
+}
+
 enum DailySummaryStatus {
   DRAFT
   SUBMITTED
@@ -122,6 +130,8 @@ model Company {
   buses         Bus[]
   assignments   BusAssignment[]
   trips         Trip[]
+  operationalExpenses OperationalExpense[]
+  operationalIncomes  OperationalIncome[]
   summaries     DailySummary[]
 
   @@schema("busapp")
@@ -161,6 +171,8 @@ model StaffProfile {
   conductorAssignments BusAssignment[] @relation("ConductorAssignment")
   defaultDriverBuses    Bus[]           @relation("BusDefaultDriver")
   defaultConductorBuses Bus[]           @relation("BusDefaultConductor")
+  driverTrips          Trip[]          @relation("TripDriver")
+  conductorTrips       Trip[]          @relation("TripConductor")
 
   @@index([companyId])
   @@index([roleType])
@@ -233,6 +245,8 @@ model Bus {
   assignments BusAssignment[]
   accessPins  BusAccessPin[]
   trips       Trip[]
+  operationalExpenses OperationalExpense[]
+  operationalIncomes  OperationalIncome[]
   summaries   DailySummary[]
 
   @@unique([companyId, registrationNumber])
@@ -242,6 +256,52 @@ model Bus {
   @@index([defaultDriverStaffId])
   @@index([defaultConductorStaffId])
   @@index([isActive])
+  @@schema("busapp")
+}
+
+model OperationalExpense {
+  id            String          @id @default(uuid())
+  companyId     String
+  busId         String
+  /** Business date (stored as UTC midnight for the selected local date). */
+  recordDate    DateTime
+  category      ExpenseCategory
+  amount        Decimal         @db.Decimal(12, 2)
+  note          String?
+  enteredByType String          @default("dashboard")
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bus     Bus     @relation(fields: [busId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([busId])
+  @@index([recordDate])
+  @@index([category])
+  @@schema("busapp")
+}
+
+model OperationalIncome {
+  id            String             @id @default(uuid())
+  companyId     String
+  busId         String
+  /** Business date (stored as UTC midnight for the selected local date). */
+  recordDate    DateTime
+  category      ExtraIncomeCategory
+  amount        Decimal            @db.Decimal(12, 2)
+  note          String?
+  enteredByType String             @default("dashboard")
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bus     Bus     @relation(fields: [busId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([busId])
+  @@index([recordDate])
+  @@index([category])
   @@schema("busapp")
 }
 
@@ -302,31 +362,36 @@ model BusAccessPin {
 }
 
 model Trip {
-  id           String         @id @default(uuid())
-  companyId    String
-  busId        String
-  assignmentId String?
-  routeId      String?
-  tripDate     DateTime
-  tripNumber   Int
-  direction    RouteDirection
-  startStopId  String?
-  endStopId    String?
-  startedAt    DateTime?
-  endedAt      DateTime?
-  status       TripStatus     @default(NOT_STARTED)
-  createdVia   String         @default("bus_app")
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id               String         @id @default(uuid())
+  companyId        String
+  busId            String
+  assignmentId     String?
+  routeId          String?
+  tripDate         DateTime
+  tripNumber       Int
+  direction        RouteDirection
+  startStopId      String?
+  endStopId        String?
+  driverStaffId    String?
+  conductorStaffId String?
+  startedAt        DateTime?
+  endedAt          DateTime?
+  status           TripStatus     @default(NOT_STARTED)
+  createdVia       String         @default("bus_app")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  bus        Bus            @relation(fields: [busId], references: [id], onDelete: Cascade)
+  company   Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bus       Bus            @relation(fields: [busId], references: [id], onDelete: Cascade)
   assignment BusAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
-  route      Route?         @relation(fields: [routeId], references: [id], onDelete: SetNull)
-  startStop  RouteStop?     @relation("TripStartStop", fields: [startStopId], references: [id], onDelete: SetNull)
-  endStop    RouteStop?     @relation("TripEndStop", fields: [endStopId], references: [id], onDelete: SetNull)
-  incomes    TripIncome[]
-  expenses   TripExpense[]
+  route     Route?         @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  startStop RouteStop?     @relation("TripStartStop", fields: [startStopId], references: [id], onDelete: SetNull)
+  endStop   RouteStop?     @relation("TripEndStop", fields: [endStopId], references: [id], onDelete: SetNull)
+  driver    StaffProfile?  @relation("TripDriver", fields: [driverStaffId], references: [id], onDelete: SetNull)
+  conductor StaffProfile?  @relation("TripConductor", fields: [conductorStaffId], references: [id], onDelete: SetNull)
+  incomes   TripIncome[]
+  expenses  TripExpense[]
+  extraIncomes ExtraIncome[]
 
   @@unique([busId, tripDate, tripNumber])
   @@index([companyId])
@@ -336,6 +401,8 @@ model Trip {
   @@index([tripDate])
   @@index([status])
   @@index([direction])
+  @@index([driverStaffId])
+  @@index([conductorStaffId])
   @@schema("busapp")
 }
 
@@ -351,6 +418,23 @@ model TripIncome {
   trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
 
   @@index([tripId])
+  @@schema("busapp")
+}
+
+model ExtraIncome {
+  id            String               @id @default(uuid())
+  tripId        String
+  category      ExtraIncomeCategory
+  amount        Decimal              @db.Decimal(12, 2)
+  note          String?
+  enteredByType String               @default("bus_app")
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@index([category])
   @@schema("busapp")
 }
 

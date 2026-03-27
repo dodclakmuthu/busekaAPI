@@ -22,6 +22,8 @@ import { UpdateBusDto } from './dto/update-bus.dto';
 import { BusPinService } from './bus-pin.service';
 import { SetBusPinDto } from './dto/set-bus-pin.dto';
 import { UpdateBusStatusDto } from './dto/update-bus-status.dto';
+import { CreateOperationalExpenseDto } from './dto/create-operational-expense.dto';
+import { CreateOperationalIncomeDto } from './dto/create-operational-income.dto';
 import { CompanyUserRole } from '@prisma/client';
 
 type AuthedCompanyRequest = Request & {
@@ -47,6 +49,32 @@ export class BusController {
   @Get()
   findAll(@GetCompany() company: { id: string }) {
     return this.busService.findAll(company.id);
+  }
+
+  /** GET /buses/active */
+  @Get('active')
+  findActive(@GetCompany() company: { id: string }) {
+    return this.busService.findActive(company.id);
+  }
+
+  /** POST /buses/:id/operational-expenses */
+  @Post(':id/operational-expenses')
+  addOperationalExpense(
+    @GetCompany() company: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateOperationalExpenseDto,
+  ) {
+    return this.busService.addOperationalExpense(company.id, id, dto);
+  }
+
+  /** POST /buses/:id/operational-incomes */
+  @Post(':id/operational-incomes')
+  addOperationalIncome(
+    @GetCompany() company: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateOperationalIncomeDto,
+  ) {
+    return this.busService.addOperationalIncome(company.id, id, dto);
   }
 
   /** GET /buses/:id */
