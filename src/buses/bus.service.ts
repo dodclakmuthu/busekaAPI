@@ -25,6 +25,22 @@ export class BusService {
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
+  /** Convert Decimal wage fields to plain numbers for JSON serialisation. */
+  private mapBus<T extends {
+    driverPercentage?: Prisma.Decimal | null;
+    conductorPercentage?: Prisma.Decimal | null;
+    fixedDriverWage?: Prisma.Decimal | null;
+    fixedConductorWage?: Prisma.Decimal | null;
+  }>(bus: T) {
+    return {
+      ...bus,
+      driverPercentage: decimalToNumber(bus.driverPercentage) || null,
+      conductorPercentage: decimalToNumber(bus.conductorPercentage) || null,
+      fixedDriverWage: decimalToNumber(bus.fixedDriverWage) || null,
+      fixedConductorWage: decimalToNumber(bus.fixedConductorWage) || null,
+    };
+  }
+
   /** Ensure a bus belongs to the company, or throw 404. */
   private async resolveBus(busId: string, companyId: string) {
     const bus = await this.prisma.bus.findFirst({
@@ -93,11 +109,16 @@ export class BusService {
         routeId: dto.routeId ?? null,
         seatCount: dto.seatCount ?? null,
         status: dto.status ?? 'ACTIVE',
+        wageModel: dto.wageModel ?? 'PERCENTAGE',
+        driverPercentage: dto.driverPercentage != null ? new Prisma.Decimal(dto.driverPercentage) : null,
+        conductorPercentage: dto.conductorPercentage != null ? new Prisma.Decimal(dto.conductorPercentage) : null,
+        fixedDriverWage: dto.fixedDriverWage != null ? new Prisma.Decimal(dto.fixedDriverWage) : null,
+        fixedConductorWage: dto.fixedConductorWage != null ? new Prisma.Decimal(dto.fixedConductorWage) : null,
       },
       include: { route: { select: { id: true, routeName: true, routeCode: true } } },
     });
 
-    return { bus };
+    return { bus: this.mapBus(bus) };
   }
 
   async findAll(companyId: string) {
@@ -106,7 +127,7 @@ export class BusService {
       orderBy: { createdAt: 'desc' },
       include: { route: { select: { id: true, routeName: true, routeCode: true } } },
     });
-    return { buses };
+    return { buses: buses.map(b => this.mapBus(b)) };
   }
 
   /** GET /buses/active - active/available buses only (status=ACTIVE). */
@@ -116,7 +137,7 @@ export class BusService {
       orderBy: { createdAt: 'desc' },
       include: { route: { select: { id: true, routeName: true, routeCode: true } } },
     });
-    return { buses };
+    return { buses: buses.map(b => this.mapBus(b)) };
   }
 
   async findOne(companyId: string, busId: string) {
@@ -125,7 +146,7 @@ export class BusService {
       include: { route: { select: { id: true, routeName: true, routeCode: true } } },
     });
     if (!bus) throw new NotFoundException(`Bus ${busId} not found`);
-    return { bus };
+    return { bus: this.mapBus(bus) };
   }
 
   async update(companyId: string, busId: string, dto: UpdateBusDto) {
@@ -167,6 +188,11 @@ export class BusService {
       ...(dto.status !== undefined && { status: dto.status }),
       ...(dto.defaultDriverStaffId !== undefined && { defaultDriverStaffId: dto.defaultDriverStaffId }),
       ...(dto.defaultConductorStaffId !== undefined && { defaultConductorStaffId: dto.defaultConductorStaffId }),
+      ...(dto.wageModel !== undefined && { wageModel: dto.wageModel }),
+      ...(dto.driverPercentage !== undefined && { driverPercentage: dto.driverPercentage != null ? new Prisma.Decimal(dto.driverPercentage) : null }),
+      ...(dto.conductorPercentage !== undefined && { conductorPercentage: dto.conductorPercentage != null ? new Prisma.Decimal(dto.conductorPercentage) : null }),
+      ...(dto.fixedDriverWage !== undefined && { fixedDriverWage: dto.fixedDriverWage != null ? new Prisma.Decimal(dto.fixedDriverWage) : null }),
+      ...(dto.fixedConductorWage !== undefined && { fixedConductorWage: dto.fixedConductorWage != null ? new Prisma.Decimal(dto.fixedConductorWage) : null }),
     };
 
     const include = { route: { select: { id: true, routeName: true, routeCode: true } } };
@@ -188,7 +214,7 @@ export class BusService {
       return updated;
     });
 
-    return { bus };
+    return { bus: this.mapBus(bus) };
   }
 
   /** PATCH /buses/:id/status */
@@ -216,7 +242,7 @@ export class BusService {
       return updated;
     });
 
-    return { bus };
+    return { bus: this.mapBus(bus) };
   }
 
   // ── Operational (non-trip) finance records ───────────────────────────────

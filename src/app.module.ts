@@ -10,9 +10,11 @@ import { AssignmentsModule } from './assignments/assignments.module';
 import { CrewDutyAuthModule } from './crew-duty-auth/crew-duty-auth.module';
 import { CrewDutyModule } from './crew-duty/crew-duty.module';
 import { TripsModule } from './trips/trips.module';
+import { SettlementsModule } from './settlements/settlements.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, CrewDutyAuthModule, CrewDutyModule, CompanyModule, BusModule, StaffModule, AssignmentsModule, TripsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, CrewDutyAuthModule, CrewDutyModule, CompanyModule, BusModule, StaffModule, AssignmentsModule, TripsModule, SettlementsModule, SettingsModule],
   controllers: [AppController],
 })
 export class AppModule {}

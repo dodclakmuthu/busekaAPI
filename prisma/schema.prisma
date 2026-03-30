@@ -93,6 +93,13 @@ enum DailySummaryStatus {
   @@schema("busapp")
 }
 
+enum WageModel {
+  PERCENTAGE
+  FIXED
+
+  @@schema("busapp")
+}
+
 model User {
   id           String   @id @default(uuid())
   fullName     String
@@ -133,6 +140,7 @@ model Company {
   operationalExpenses OperationalExpense[]
   operationalIncomes  OperationalIncome[]
   summaries     DailySummary[]
+  settings      CompanySettings?
 
   @@schema("busapp")
 }
@@ -234,6 +242,11 @@ model Bus {
   status             BusStatus @default(ACTIVE)
   defaultDriverStaffId    String?
   defaultConductorStaffId String?
+  wageModel            WageModel @default(PERCENTAGE)
+  driverPercentage     Decimal?  @db.Decimal(5, 2)
+  conductorPercentage  Decimal?  @db.Decimal(5, 2)
+  fixedDriverWage      Decimal?  @db.Decimal(12, 2)
+  fixedConductorWage   Decimal?  @db.Decimal(12, 2)
   isActive           Boolean   @default(true)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -464,7 +477,13 @@ model DailySummary {
   totalTrips       Int                @default(0)
   totalIncome      Decimal            @default(0) @db.Decimal(12, 2)
   totalExpenses    Decimal            @default(0) @db.Decimal(12, 2)
+  dti              Decimal            @default(0) @db.Decimal(12, 2)
+  driverSalary     Decimal            @default(0) @db.Decimal(12, 2)
+  conductorSalary  Decimal            @default(0) @db.Decimal(12, 2)
   netAmount        Decimal            @default(0) @db.Decimal(12, 2)
+  wageModelSnapshot    String?
+  driverPctSnapshot    Decimal?           @db.Decimal(5, 2)
+  conductorPctSnapshot Decimal?           @db.Decimal(5, 2)
   status           DailySummaryStatus @default(DRAFT)
   submittedAt      DateTime?
   approvedAt       DateTime?
@@ -483,5 +502,30 @@ model DailySummary {
   @@index([assignmentId])
   @@index([summaryDate])
   @@index([status])
+  @@schema("busapp")
+}
+
+/// Company-level configuration. One row per company, created lazily on first access.
+model CompanySettings {
+  id        String  @id @default(uuid())
+  companyId String  @unique
+
+  /// Default driver wage percentage (used as a hint when creating new buses)
+  defaultDriverPercentage     Decimal? @db.Decimal(5, 2)
+  /// Default conductor wage percentage
+  defaultConductorPercentage  Decimal? @db.Decimal(5, 2)
+  /// Default fixed daily driver wage (Rs.)
+  defaultFixedDriverWage      Decimal? @db.Decimal(12, 2)
+  /// Default fixed daily conductor wage (Rs.)
+  defaultFixedConductorWage   Decimal? @db.Decimal(12, 2)
+  /// Warn on settlement screen if driver% + conductor% exceeds this value
+  maxCombinedPercentageWarning Decimal? @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
   @@schema("busapp")
 }

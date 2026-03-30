@@ -2,13 +2,14 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
   Min,
 } from 'class-validator';
-import { BusStatus } from '@prisma/client';
+import { BusStatus, WageModel } from '@prisma/client';
 
 export class CreateBusDto {
   @IsString()
@@ -38,4 +39,28 @@ export class CreateBusDto {
   @IsOptional()
   @IsEnum(BusStatus)
   status?: BusStatus;
+
+  @IsOptional()
+  @IsEnum(WageModel)
+  wageModel?: WageModel;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  driverPercentage?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  conductorPercentage?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  fixedDriverWage?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  fixedConductorWage?: number;
 }
