@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBusDto } from './dto/create-bus.dto';
 import { UpdateBusDto } from './dto/update-bus.dto';
@@ -53,13 +54,33 @@ export class BusService {
   /** Validate a routeId belongs to the same company (when supplied). */
   private async validateRoute(routeId: string, companyId: string) {
     const route = await this.prisma.route.findFirst({
-      where: { id: routeId, companyId, isActive: true },
+      where: {
+        id: routeId,
+        isActive: true,
+        OR: [
+          {
+            companyId,
+            sourceType: { not: 'GLOBAL' },
+          },
+          {
+            sourceType: 'GLOBAL',
+            approvalStatus: 'APPROVED',
+          },
+        ],
+      },
       select: { id: true },
     });
     if (!route) {
-      throw new NotFoundException(`Route ${routeId} not found in your company`);
+      throw new NotFoundException(`Route ${routeId} is not available for bus assignment`);
     }
   }
+
+  private readonly routeSummarySelect = {
+    id: true,
+    routeName: true,
+    routeCode: true,
+    sourceType: true,
+  } as const;
 
   private async validateDefaultDriver(staffId: string, companyId: string) {
     const staff = await this.prisma.staffProfile.findFirst({
@@ -115,7 +136,7 @@ export class BusService {
         fixedDriverWage: dto.fixedDriverWage != null ? new Prisma.Decimal(dto.fixedDriverWage) : null,
         fixedConductorWage: dto.fixedConductorWage != null ? new Prisma.Decimal(dto.fixedConductorWage) : null,
       },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+      include: { route: { select: this.routeSummarySelect } },
     });
 
     return { bus: this.mapBus(bus) };
@@ -125,7 +146,7 @@ export class BusService {
     const buses = await this.prisma.bus.findMany({
       where: { companyId, isActive: true },
       orderBy: { createdAt: 'desc' },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+      include: { route: { select: this.routeSummarySelect } },
     });
     return { buses: buses.map(b => this.mapBus(b)) };
   }
@@ -135,7 +156,7 @@ export class BusService {
     const buses = await this.prisma.bus.findMany({
       where: { companyId, isActive: true, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+      include: { route: { select: this.routeSummarySelect } },
     });
     return { buses: buses.map(b => this.mapBus(b)) };
   }
@@ -143,7 +164,7 @@ export class BusService {
   async findOne(companyId: string, busId: string) {
     const bus = await this.prisma.bus.findFirst({
       where: { id: busId, companyId, isActive: true },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+      include: { route: { select: this.routeSummarySelect } },
     });
     if (!bus) throw new NotFoundException(`Bus ${busId} not found`);
     return { bus: this.mapBus(bus) };
@@ -151,6 +172,25 @@ export class BusService {
 
   async update(companyId: string, busId: string, dto: UpdateBusDto) {
     await this.resolveBus(busId, companyId);
+
+    if (!dto.confirmationPin?.trim()) {
+      throw new BadRequestException('Bus PIN confirmation is required to edit this bus');
+    }
+
+    const activePin = await this.prisma.busAccessPin.findFirst({
+      where: { busId, isActive: true },
+      orderBy: { validFrom: 'desc' },
+      select: { pinHash: true },
+    });
+
+    if (!activePin) {
+      throw new BadRequestException('No active PIN is set for this bus');
+    }
+
+    const validPin = await bcrypt.compare(dto.confirmationPin, activePin.pinHash);
+    if (!validPin) {
+      throw new BadRequestException('Invalid bus PIN');
+    }
 
     if (dto.registrationNumber) {
       const duplicate = await this.prisma.bus.findFirst({
@@ -195,7 +235,7 @@ export class BusService {
       ...(dto.fixedConductorWage !== undefined && { fixedConductorWage: dto.fixedConductorWage != null ? new Prisma.Decimal(dto.fixedConductorWage) : null }),
     };
 
-    const include = { route: { select: { id: true, routeName: true, routeCode: true } } };
+    const include = { route: { select: this.routeSummarySelect } };
 
     const bus = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.bus.update({
@@ -228,7 +268,7 @@ export class BusService {
         where: { id: busId },
         data: { status },
         include: {
-          route: { select: { id: true, routeName: true, routeCode: true } },
+          route: { select: this.routeSummarySelect },
         },
       });
 

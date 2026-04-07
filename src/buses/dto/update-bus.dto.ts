@@ -61,4 +61,8 @@ export class UpdateBusDto {
   @IsNumber()
   @Min(0)
   fixedConductorWage?: number;
+
+  @IsOptional()
+  @IsString()
+  confirmationPin?: string;
 }

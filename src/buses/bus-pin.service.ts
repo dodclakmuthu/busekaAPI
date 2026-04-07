@@ -7,6 +7,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { SetBusPinDto } from './dto/set-bus-pin.dto';
+import { VerifyBusPinDto } from './dto/verify-bus-pin.dto';
 
 @Injectable()
 export class BusPinService {
@@ -110,5 +111,26 @@ export class BusPinService {
     });
 
     return { pin };
+  }
+
+  async verifyPin(companyId: string, busId: string, dto: VerifyBusPinDto) {
+    await this.resolveBus(companyId, busId);
+
+    const activePin = await this.prisma.busAccessPin.findFirst({
+      where: { busId, isActive: true },
+      orderBy: { validFrom: 'desc' },
+      select: { id: true, pinHash: true },
+    });
+
+    if (!activePin) {
+      throw new BadRequestException('No active PIN is set for this bus');
+    }
+
+    const ok = await bcrypt.compare(dto.pin, activePin.pinHash);
+    if (!ok) {
+      throw new BadRequestException('Invalid bus PIN');
+    }
+
+    return { verified: true };
   }
 }

@@ -1,0 +1,82 @@
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CompanyGuard } from '../company/guards/company.guard';
+import { GetCompany } from '../company/decorators/get-company.decorator';
+import { ReportsService } from './reports.service';
+import { ReportQueryDto } from './dto/report-query.dto';
+
+@UseGuards(JwtAuthGuard, CompanyGuard)
+@Controller('reports')
+export class ReportsController {
+  constructor(private readonly reportsService: ReportsService) {}
+
+  /**
+   * GET /reports/income?date=YYYY-MM-DD
+   * GET /reports/income?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+   *
+   * Income breakdown per bus: trip income, extra income, operational income.
+   */
+  @Get('income')
+  getIncome(
+    @GetCompany() company: { id: string },
+    @Query() query: ReportQueryDto,
+  ) {
+    return this.reportsService.getIncomeReport(company.id, query);
+  }
+
+  /**
+   * GET /reports/expenses?date=YYYY-MM-DD
+   * GET /reports/expenses?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+   *
+   * Expense breakdown by category and per bus.
+   */
+  @Get('expenses')
+  getExpenses(
+    @GetCompany() company: { id: string },
+    @Query() query: ReportQueryDto,
+  ) {
+    return this.reportsService.getExpensesReport(company.id, query);
+  }
+
+  /**
+   * GET /reports/profitability?date=YYYY-MM-DD
+   * GET /reports/profitability?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+   *
+   * Bus-level profitability: income, expenses, DTI, salaries, profit.
+   */
+  @Get('profitability')
+  getProfitability(
+    @GetCompany() company: { id: string },
+    @Query() query: ReportQueryDto,
+  ) {
+    return this.reportsService.getProfitabilityReport(company.id, query);
+  }
+
+  /**
+   * GET /reports/salaries?date=YYYY-MM-DD
+   * GET /reports/salaries?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+   *
+   * Salary payable per staff member with per-day breakdown.
+   */
+  @Get('salaries')
+  getSalaries(
+    @GetCompany() company: { id: string },
+    @Query() query: ReportQueryDto,
+  ) {
+    return this.reportsService.getSalariesReport(company.id, query);
+  }
+
+  /**
+   * GET /reports/routes?date=YYYY-MM-DD
+   * GET /reports/routes?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+   *
+   * Performance grouped by route with per-bus breakdown.
+   */
+  @Get('routes')
+  getRoutes(
+    @GetCompany() company: { id: string },
+    @Query() query: ReportQueryDto,
+  ) {
+    return this.reportsService.getRouteReport(company.id, query);
+  }
+}

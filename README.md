@@ -24,3 +24,6 @@ Then open:
 npx prisma migrate dev --name init
 npx prisma generate
 ```
+
+### create admin portal account
+`npm run create-admin -- --mobile 0771045601 --name "Admin" --password "Test.123"`
