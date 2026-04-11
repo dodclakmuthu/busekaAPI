@@ -11,6 +11,20 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   /**
+   * GET /reports/dashboard?date=YYYY-MM-DD
+   * GET /reports/dashboard?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+   *
+   * Single payload for the dashboard page.
+   */
+  @Get('dashboard')
+  getDashboard(
+    @GetCompany() company: { id: string },
+    @Query() query: ReportQueryDto,
+  ) {
+    return this.reportsService.getDashboardReport(company.id, query);
+  }
+
+  /**
    * GET /reports/income?date=YYYY-MM-DD
    * GET /reports/income?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
    *
