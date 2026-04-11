@@ -10,6 +10,7 @@ import { CreateCompanyRouteDto } from './dto/create-company-route.dto';
 import { UpdateCompanyRouteDto } from './dto/update-company-route.dto';
 import { StopInputDto } from './dto/stop-input.dto';
 import { ListCompanyRoutesQueryDto } from './dto/list-company-routes-query.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   buildApprovalSnapshotHash,
   buildRouteHistorySnapshot,
@@ -50,7 +51,10 @@ const ROUTE_HISTORY_INCLUDE = {
 
 @Injectable()
 export class CompanyRoutesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private decimalOrNull(value: Prisma.Decimal | number | string | null | undefined): number | null {
     if (value == null) return null;
@@ -442,6 +446,34 @@ export class CompanyRoutesService {
           },
           include: ROUTE_INCLUDE,
         });
+
+        await this.notificationsService.createCompanyNotificationOnce(
+          {
+            companyId,
+            type: 'ROUTE_UPDATE_APPROVAL_REQUIRED',
+            title: 'Route Needs Re-Approval',
+            message: `Changes to route ${route.routeCode ?? route.routeName} require admin approval before it can be approved again.`,
+            severity: 'WARNING',
+            relatedEntityType: 'ROUTE',
+            relatedEntityId: route.id,
+            targetUrl: '/routes',
+            metadata: {
+              routeId: route.id,
+              routeCode: route.routeCode,
+              routeName: route.routeName,
+              approvalStatus: route.approvalStatus,
+            },
+            dedupeWhere: {
+              companyId,
+              userId: null,
+              type: 'ROUTE_UPDATE_APPROVAL_REQUIRED',
+              relatedEntityType: 'ROUTE',
+              relatedEntityId: route.id,
+              isRead: false,
+            },
+          },
+          tx,
+        );
       }
 
       await this.createRouteHistory(tx, route, RouteHistoryActionType.UPDATED, userId);

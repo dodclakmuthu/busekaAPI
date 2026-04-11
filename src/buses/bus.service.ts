@@ -19,10 +19,14 @@ import {
 } from '../common/finance';
 import { CreateOperationalExpenseDto } from './dto/create-operational-expense.dto';
 import { CreateOperationalIncomeDto } from './dto/create-operational-income.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class BusService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -127,6 +131,8 @@ export class BusService {
         registrationNumber: dto.registrationNumber,
         busName: dto.busName,
         ntcPermitNumber: dto.ntcPermitNumber,
+        permitExpiry: dto.permitExpiry ? new Date(dto.permitExpiry) : null,
+        insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null,
         routeId: dto.routeId ?? null,
         seatCount: dto.seatCount ?? null,
         status: dto.status ?? 'ACTIVE',
@@ -223,6 +229,8 @@ export class BusService {
       ...(dto.registrationNumber !== undefined && { registrationNumber: dto.registrationNumber }),
       ...(dto.busName !== undefined && { busName: dto.busName }),
       ...(dto.ntcPermitNumber !== undefined && { ntcPermitNumber: dto.ntcPermitNumber }),
+      ...(dto.permitExpiry !== undefined && { permitExpiry: dto.permitExpiry ? new Date(dto.permitExpiry) : null }),
+      ...(dto.insuranceExpiry !== undefined && { insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null }),
       ...(dto.routeId !== undefined && { routeId: dto.routeId }),
       ...(dto.seatCount !== undefined && { seatCount: dto.seatCount }),
       ...(dto.status !== undefined && { status: dto.status }),
@@ -259,7 +267,7 @@ export class BusService {
 
   /** PATCH /buses/:id/status */
   async updateStatus(companyId: string, busId: string, status: BusStatus) {
-    await this.resolveBus(busId, companyId);
+    const existingBus = await this.resolveBus(busId, companyId);
 
     const now = new Date();
 
@@ -277,6 +285,23 @@ export class BusService {
           where: { busId, isActive: true },
           data: { isActive: false, validUntil: now },
         });
+      }
+
+      if (status === 'MAINTENANCE' && existingBus.status !== 'MAINTENANCE') {
+        await this.notificationsService.createCompanyNotification(
+          {
+            companyId,
+            type: 'BUS_MAINTENANCE',
+            title: 'Bus in Maintenance',
+            message: `${updated.registrationNumber} was moved to maintenance status.`,
+            severity: 'INFO',
+            relatedEntityType: 'BUS',
+            relatedEntityId: updated.id,
+            targetUrl: '/buses',
+            metadata: { status },
+          },
+          tx,
+        );
       }
 
       return updated;

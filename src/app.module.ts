@@ -15,9 +15,10 @@ import { SettingsModule } from './settings/settings.module';
 import { ReportsModule } from './reports/reports.module';
 import { AdminModule } from './admin/admin.module';
 import { CompanyRoutesModule } from './company-routes/company-routes.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, CrewDutyAuthModule, CrewDutyModule, CompanyModule, CompanyRoutesModule, BusModule, StaffModule, AssignmentsModule, TripsModule, SettlementsModule, SettingsModule, ReportsModule, AdminModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule, CrewDutyAuthModule, CrewDutyModule, CompanyModule, CompanyRoutesModule, BusModule, StaffModule, AssignmentsModule, TripsModule, SettlementsModule, SettingsModule, ReportsModule, NotificationsModule, AdminModule],
   controllers: [AppController],
 })
 export class AppModule {}

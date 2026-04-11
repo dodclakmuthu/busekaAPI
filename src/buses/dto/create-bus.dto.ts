@@ -1,4 +1,5 @@
 import {
+  IsDateString,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -26,6 +27,14 @@ export class CreateBusDto {
   @IsString()
   @MaxLength(40)
   ntcPermitNumber?: string;
+
+  @IsOptional()
+  @IsDateString()
+  permitExpiry?: string;
+
+  @IsOptional()
+  @IsDateString()
+  insuranceExpiry?: string;
 
   @IsOptional()
   @IsUUID()
