@@ -23,6 +23,7 @@ import {
   normalizeExtraIncomeCategory,
 } from '../common/finance';
 import { CreateExtraIncomeDto } from './dto/create-extra-income.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const DRIVER_ROLES = ['DRIVER', 'DRIVER_CONDUCTOR'] as const;
 const CONDUCTOR_ROLES = ['CONDUCTOR', 'DRIVER_CONDUCTOR'] as const;
@@ -72,7 +73,10 @@ function mapTripStatus(status: string): string {
 
 @Injectable()
 export class TripsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -577,6 +581,7 @@ export class TripsService {
           busId: true,
           tripDate: true,
           tripNumber: true,
+          routeId: true,
           startStopId: true,
           endStopId: true,
           driverStaffId: true,
@@ -584,6 +589,17 @@ export class TripsService {
           startedAt: true,
           endedAt: true,
           status: true,
+          bus: {
+            select: {
+              registrationNumber: true,
+            },
+          },
+          route: {
+            select: {
+              routeCode: true,
+              routeName: true,
+            },
+          },
         },
       });
 
@@ -597,6 +613,27 @@ export class TripsService {
         select: { id: true },
       });
 
+      const routeLabel = t.route?.routeCode
+        ? ` on Route ${t.route.routeCode}`
+        : t.route?.routeName
+          ? ` on ${t.route.routeName}`
+          : '';
+
+      await this.notificationsService.createCompanyNotification(
+        {
+          companyId,
+          type: 'TRIP_COMPLETED',
+          title: 'Trip Completed',
+          message: `Bus ${t.bus.registrationNumber} completed Trip #${t.tripNumber}${routeLabel}. Income: Rs. ${amount.toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          severity: 'SUCCESS',
+          relatedEntityType: 'TRIP',
+          relatedEntityId: t.id,
+          targetUrl: '/trips',
+          metadata: { income: amount, busId: t.busId, tripNumber: t.tripNumber },
+        },
+        tx,
+      );
+
       return t;
     });
 
@@ -606,7 +643,7 @@ export class TripsService {
         busId: updated.busId,
         driverId: updated.driverStaffId ?? '',
         conductorId: updated.conductorStaffId ?? null,
-        routeId: null,
+        routeId: updated.routeId ?? null,
         date: dateToYmdUtc(updated.tripDate),
         tripNumber: updated.tripNumber,
         startPointId: updated.startStopId ?? '',

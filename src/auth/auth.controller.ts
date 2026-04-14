@@ -1,16 +1,21 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
-import { Request } from 'express';
+import { Body, Controller, Get, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { SafeUser } from './auth.types';
+import { DASHBOARD_AUTH_COOKIE, getAuthCookieOptions } from './auth-cookie';
+import { LoginAttemptService } from '../common/login-attempt.service';
 
 type AuthedRequest = Request & { user?: SafeUser };
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly loginAttempts: LoginAttemptService,
+  ) {}
 
   @Post('signup')
   async signup(@Body() dto: SignupDto) {
@@ -18,8 +23,31 @@ export class AuthController {
   }
 
   @Post('login')
-  async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: LoginDto,
+  ) {
+    const key = `dashboard:${req.ip ?? 'unknown'}:${dto.mobileNumber.trim()}`;
+    this.loginAttempts.assertAllowed(key);
+
+    try {
+      const result = await this.authService.login(dto);
+      this.loginAttempts.reset(key);
+      res.cookie(DASHBOARD_AUTH_COOKIE, result.accessToken, getAuthCookieOptions());
+      return { user: result.user };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        this.loginAttempts.recordFailure(key);
+      }
+      throw error;
+    }
+  }
+
+  @Post('logout')
+  logout(@Res({ passthrough: true }) res: Response) {
+    res.clearCookie(DASHBOARD_AUTH_COOKIE, getAuthCookieOptions());
+    return { success: true };
   }
 
   @UseGuards(JwtAuthGuard)

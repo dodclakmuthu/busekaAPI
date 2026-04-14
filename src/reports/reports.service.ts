@@ -1,5 +1,12 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  PERFORMANCE_METRICS,
+  type PerformanceMetric,
+  type PerformanceCategory,
+  type PerformanceReportQueryDto,
+} from './dto/performance-report-query.dto';
 import { ReportQueryDto } from './dto/report-query.dto';
 import { decimalToNumber, mapExpenseCategoryToDashboard } from '../common/finance';
 import {
@@ -17,6 +24,10 @@ export interface DateRange {
 }
 
 export function resolveDateRange(query: ReportQueryDto): DateRange {
+  if ((query.startDate && !query.endDate) || (!query.startDate && query.endDate)) {
+    throw new BadRequestException('startDate and endDate must be provided together');
+  }
+
   if (query.startDate && query.endDate) {
     const s = parseYmd(query.startDate);
     const e = parseYmd(query.endDate);
@@ -32,6 +43,28 @@ export function resolveDateRange(query: ReportQueryDto): DateRange {
   const range = getBusinessDayRangeUtc({ date: ymd });
   if (!range) throw new BadRequestException('Invalid date');
   return { start: range.start, end: range.end, label: ymd };
+}
+
+const DASHBOARD_EXPENSE_CATEGORIES = [
+  'diesel',
+  'expressway',
+  'runner',
+  'parking',
+  'meals',
+  'repairs',
+  'other',
+] as const;
+
+type DashboardExpenseCategory = (typeof DASHBOARD_EXPENSE_CATEGORIES)[number];
+
+type DashboardAlertType = 'maintenance' | 'trip_in_progress';
+
+type DashboardAlertSeverity = 'info' | 'warning' | 'critical';
+
+type DashboardFleetBadge = 'On Trip' | 'Active' | 'Maintenance' | 'Inactive';
+
+function buildEmptyExpenseBreakdown() {
+  return DASHBOARD_EXPENSE_CATEGORIES.map((category) => ({ category, amount: 0 }));
 }
 
 // ─── Salary calculation (mirrors settlements logic) ──────────────────────────
@@ -56,11 +89,838 @@ function computeSalaries(
   return { driverSalary: fixedDriver, conductorSalary: fixedConductor };
 }
 
+const MAX_PERFORMANCE_CHART_ENTITIES = 8;
+
+function formatDayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function buildDateLabels(range: DateRange): string[] {
+  const labels: string[] = [];
+  for (let cursor = new Date(range.start); cursor < range.end; cursor = new Date(cursor.getTime() + 86_400_000)) {
+    labels.push(formatDayKey(cursor));
+  }
+  return labels;
+}
+
+function metricLabel(metric: PerformanceMetric): string {
+  switch (metric) {
+    case 'income':
+      return 'Income';
+    case 'salary':
+      return 'Salary';
+    case 'expenses':
+      return 'Expenses';
+  }
+}
+
+function metricSortValue(values: Record<PerformanceMetric, number>, metric: PerformanceMetric): number {
+  return values[metric] ?? 0;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getPerformanceReport(companyId: string, query: PerformanceReportQueryDto) {
+    const range = resolveDateRange(query);
+    const metric = query.metric ?? 'income';
+    const selectedEntityIds = query.entityIds?.length ? query.entityIds : undefined;
+    const dateLabels = buildDateLabels(range);
+
+    if (query.category === 'BUSES' && metric === 'salary') {
+      throw new BadRequestException('salary metric is only supported for DRIVERS and CONDUCTORS');
+    }
+
+    const buses = await this.prisma.bus.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        ...(query.category === 'BUSES' && selectedEntityIds?.length
+          ? { id: { in: selectedEntityIds } }
+          : {}),
+      },
+      select: {
+        id: true,
+        registrationNumber: true,
+        busName: true,
+        wageModel: true,
+        driverPercentage: true,
+        conductorPercentage: true,
+        fixedDriverWage: true,
+        fixedConductorWage: true,
+        route: { select: { id: true, routeName: true, routeCode: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (query.category === 'BUSES' && selectedEntityIds?.length && buses.length === 0) {
+      throw new NotFoundException('No matching buses found');
+    }
+
+    const busIds = buses.map((bus) => bus.id);
+    if (busIds.length === 0) {
+      return {
+        data: {
+          filters: {
+            category: query.category,
+            startDate: formatDayKey(range.start),
+            endDate: formatDayKey(new Date(range.end.getTime() - 86_400_000)),
+            metric,
+            entityIds: selectedEntityIds ?? [],
+          },
+          summary: [],
+          chart: { labels: dateLabels, series: [] },
+        },
+      };
+    }
+
+    const selectedStaff =
+      selectedEntityIds?.length && (query.category === 'DRIVERS' || query.category === 'CONDUCTORS')
+        ? await this.prisma.staffProfile.findMany({
+            where: {
+              companyId,
+              id: { in: selectedEntityIds },
+              isActive: true,
+            },
+            select: {
+              id: true,
+              fullName: true,
+              roleType: true,
+            },
+          })
+        : [];
+
+    if ((query.category === 'DRIVERS' || query.category === 'CONDUCTORS') && selectedEntityIds?.length) {
+      if (selectedStaff.length === 0) {
+        throw new NotFoundException('No matching staff members found');
+      }
+
+      const invalidStaff = selectedStaff.find((staff) => {
+        if (query.category === 'DRIVERS') {
+          return staff.roleType !== 'DRIVER' && staff.roleType !== 'DRIVER_CONDUCTOR';
+        }
+
+        return staff.roleType !== 'CONDUCTOR' && staff.roleType !== 'DRIVER_CONDUCTOR';
+      });
+
+      if (invalidStaff) {
+        throw new BadRequestException(
+          `Selected staff member ${invalidStaff.fullName} is not compatible with ${query.category} category`,
+        );
+      }
+    }
+
+    const assignmentsWhere: Prisma.BusAssignmentWhereInput = {
+      companyId,
+      busId: { in: busIds },
+      assignmentDate: { gte: range.start, lt: range.end },
+      status: { not: 'CANCELLED' },
+      ...(query.category === 'DRIVERS' && selectedEntityIds?.length
+        ? { driverStaffId: { in: selectedEntityIds } }
+        : {}),
+      ...(query.category === 'CONDUCTORS' && selectedEntityIds?.length
+        ? { conductorStaffId: { in: selectedEntityIds } }
+        : {}),
+    };
+
+    const [assignments, lockedSummaries, trips, opExpGroups, opIncGroups] = await Promise.all([
+      this.prisma.busAssignment.findMany({
+        where: assignmentsWhere,
+        select: {
+          id: true,
+          busId: true,
+          assignmentDate: true,
+          driverStaffId: true,
+          conductorStaffId: true,
+          driver: { select: { id: true, fullName: true, roleType: true } },
+          conductor: { select: { id: true, fullName: true, roleType: true } },
+        },
+      }),
+      this.prisma.dailySummary.findMany({
+        where: {
+          companyId,
+          busId: { in: busIds },
+          summaryDate: { gte: range.start, lt: range.end },
+          status: 'APPROVED',
+        },
+        select: {
+          busId: true,
+          assignmentId: true,
+          summaryDate: true,
+          totalTrips: true,
+          totalIncome: true,
+          totalExpenses: true,
+          dti: true,
+          driverSalary: true,
+          conductorSalary: true,
+        },
+      }),
+      this.prisma.trip.findMany({
+        where: {
+          companyId,
+          busId: { in: busIds },
+          tripDate: { gte: range.start, lt: range.end },
+          status: { not: 'CANCELLED' },
+        },
+        select: {
+          id: true,
+          busId: true,
+          tripDate: true,
+          route: { select: { routeName: true, routeCode: true } },
+        },
+      }),
+      this.prisma.operationalExpense.groupBy({
+        by: ['busId', 'recordDate'],
+        where: {
+          companyId,
+          busId: { in: busIds },
+          recordDate: { gte: range.start, lt: range.end },
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.operationalIncome.groupBy({
+        by: ['busId', 'recordDate'],
+        where: {
+          companyId,
+          busId: { in: busIds },
+          recordDate: { gte: range.start, lt: range.end },
+        },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const allTripIds = trips.map((trip) => trip.id);
+    const [incomeGroups, extraGroups, tripExpenseGroups] = allTripIds.length
+      ? await Promise.all([
+          this.prisma.tripIncome.groupBy({
+            by: ['tripId'],
+            where: { tripId: { in: allTripIds } },
+            _sum: { amount: true },
+          }),
+          this.prisma.extraIncome.groupBy({
+            by: ['tripId'],
+            where: { tripId: { in: allTripIds } },
+            _sum: { amount: true },
+          }),
+          this.prisma.tripExpense.groupBy({
+            by: ['tripId'],
+            where: { tripId: { in: allTripIds } },
+            _sum: { amount: true },
+          }),
+        ])
+      : [[], [], []];
+
+    const busById = new Map(buses.map((bus) => [bus.id, bus]));
+    const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+    const assignmentByBusDate = new Map(assignments.map((assignment) => [`${assignment.busId}|${formatDayKey(assignment.assignmentDate)}`, assignment]));
+    const incomeByTripId = new Map(incomeGroups.map((group) => [group.tripId, decimalToNumber(group._sum.amount)]));
+    const extraIncomeByTripId = new Map(extraGroups.map((group) => [group.tripId, decimalToNumber(group._sum.amount)]));
+    const tripExpenseByTripId = new Map(tripExpenseGroups.map((group) => [group.tripId, decimalToNumber(group._sum.amount)]));
+    const opExpenseByBusDate = new Map(opExpGroups.map((group) => [`${group.busId}|${formatDayKey(group.recordDate)}`, decimalToNumber(group._sum.amount)]));
+    const opIncomeByBusDate = new Map(opIncGroups.map((group) => [`${group.busId}|${formatDayKey(group.recordDate)}`, decimalToNumber(group._sum.amount)]));
+
+    const liveBusDayMap = new Map<string, {
+      busId: string;
+      date: string;
+      tripCount: number;
+      tripIncome: number;
+      extraIncome: number;
+      tripExpenses: number;
+      routeName: string | null;
+      routeCode: string | null;
+    }>();
+
+    for (const trip of trips) {
+      const date = formatDayKey(trip.tripDate);
+      const key = `${trip.busId}|${date}`;
+      const existing = liveBusDayMap.get(key) ?? {
+        busId: trip.busId,
+        date,
+        tripCount: 0,
+        tripIncome: 0,
+        extraIncome: 0,
+        tripExpenses: 0,
+        routeName: null,
+        routeCode: null,
+      };
+
+      existing.tripCount += 1;
+      existing.tripIncome += incomeByTripId.get(trip.id) ?? 0;
+      existing.extraIncome += extraIncomeByTripId.get(trip.id) ?? 0;
+      existing.tripExpenses += tripExpenseByTripId.get(trip.id) ?? 0;
+      existing.routeName = existing.routeName ?? trip.route?.routeName ?? null;
+      existing.routeCode = existing.routeCode ?? trip.route?.routeCode ?? null;
+      liveBusDayMap.set(key, existing);
+    }
+
+    const busDayKeys = new Set<string>();
+    for (const assignment of assignments) busDayKeys.add(`${assignment.busId}|${formatDayKey(assignment.assignmentDate)}`);
+    for (const summary of lockedSummaries) busDayKeys.add(`${summary.busId}|${formatDayKey(summary.summaryDate)}`);
+    for (const key of liveBusDayMap.keys()) busDayKeys.add(key);
+    for (const key of opExpenseByBusDate.keys()) busDayKeys.add(key);
+    for (const key of opIncomeByBusDate.keys()) busDayKeys.add(key);
+
+    const busDayMap = new Map<string, {
+      busId: string;
+      date: string;
+      registrationNumber: string;
+      routeName: string | null;
+      routeCode: string | null;
+      tripCount: number;
+      totalIncome: number;
+      totalExpenses: number;
+      netDTI: number;
+      driverSalary: number;
+      conductorSalary: number;
+      assignment: (typeof assignments)[number] | null;
+    }>();
+
+    const lockedSummaryByBusDate = new Map(lockedSummaries.map((summary) => [`${summary.busId}|${formatDayKey(summary.summaryDate)}`, summary]));
+
+    for (const key of busDayKeys) {
+      const [busId, date] = key.split('|');
+      const bus = busById.get(busId);
+      if (!bus) continue;
+
+      const locked = lockedSummaryByBusDate.get(key);
+      const live = liveBusDayMap.get(key);
+      const assignment =
+        (locked?.assignmentId ? assignmentById.get(locked.assignmentId) : undefined) ??
+        assignmentByBusDate.get(key) ??
+        null;
+
+      let totalIncome = 0;
+      let totalExpenses = 0;
+      let netDTI = 0;
+      let tripCount = 0;
+      let driverSalary = 0;
+      let conductorSalary = 0;
+
+      if (locked) {
+        totalIncome = decimalToNumber(locked.totalIncome);
+        totalExpenses = decimalToNumber(locked.totalExpenses);
+        netDTI = decimalToNumber(locked.dti);
+        tripCount = locked.totalTrips;
+        driverSalary = decimalToNumber(locked.driverSalary);
+        conductorSalary = decimalToNumber(locked.conductorSalary);
+      } else {
+        totalIncome = (live?.tripIncome ?? 0) + (live?.extraIncome ?? 0) + (opIncomeByBusDate.get(key) ?? 0);
+        totalExpenses = (live?.tripExpenses ?? 0) + (opExpenseByBusDate.get(key) ?? 0);
+        netDTI = totalIncome - totalExpenses;
+        tripCount = live?.tripCount ?? 0;
+
+        const { driverSalary: liveDriverSalary, conductorSalary: liveConductorSalary } = computeSalaries(
+          netDTI,
+          bus.wageModel,
+          decimalToNumber(bus.driverPercentage),
+          decimalToNumber(bus.conductorPercentage),
+          decimalToNumber(bus.fixedDriverWage),
+          decimalToNumber(bus.fixedConductorWage),
+        );
+        driverSalary = liveDriverSalary;
+        conductorSalary = liveConductorSalary;
+      }
+
+      busDayMap.set(key, {
+        busId,
+        date,
+        registrationNumber: bus.registrationNumber,
+        routeName: live?.routeName ?? bus.route?.routeName ?? null,
+        routeCode: live?.routeCode ?? bus.route?.routeCode ?? null,
+        tripCount,
+        totalIncome,
+        totalExpenses,
+        netDTI,
+        driverSalary,
+        conductorSalary,
+        assignment,
+      });
+    }
+
+    const filters = {
+      category: query.category,
+      startDate: formatDayKey(range.start),
+      endDate: formatDayKey(new Date(range.end.getTime() - 86_400_000)),
+      metric,
+      entityIds: selectedEntityIds ?? [],
+    };
+
+    if (query.category === 'BUSES') {
+      const summaryMap = new Map<string, {
+        id: string;
+        registrationNumber: string;
+        routeName: string | null;
+        activeDays: number;
+        totalIncome: number;
+        totalExpenses: number;
+        netDTI: number;
+        tripCount: number;
+        dailyValues: Map<string, Record<PerformanceMetric, number>>;
+      }>();
+
+      for (const bus of buses) {
+        summaryMap.set(bus.id, {
+          id: bus.id,
+          registrationNumber: bus.registrationNumber,
+          routeName: bus.route?.routeName ?? null,
+          activeDays: 0,
+          totalIncome: 0,
+          totalExpenses: 0,
+          netDTI: 0,
+          tripCount: 0,
+          dailyValues: new Map(),
+        });
+      }
+
+      for (const row of busDayMap.values()) {
+        const summary = summaryMap.get(row.busId);
+        if (!summary) continue;
+
+        summary.activeDays += 1;
+        summary.totalIncome += row.totalIncome;
+        summary.totalExpenses += row.totalExpenses;
+        summary.netDTI += row.netDTI;
+        summary.tripCount += row.tripCount;
+        summary.routeName = summary.routeName ?? row.routeName ?? null;
+        summary.dailyValues.set(row.date, {
+          income: (summary.dailyValues.get(row.date)?.income ?? 0) + row.totalIncome,
+          salary: 0,
+          expenses: (summary.dailyValues.get(row.date)?.expenses ?? 0) + row.totalExpenses,
+        });
+      }
+
+      let summary = Array.from(summaryMap.values()).filter((row) => {
+        if (selectedEntityIds?.length) return selectedEntityIds.includes(row.id);
+        return row.activeDays > 0 || row.totalIncome > 0 || row.totalExpenses > 0 || row.tripCount > 0;
+      });
+
+      summary.sort((left, right) =>
+        metricSortValue(
+          { income: right.totalIncome, salary: 0, expenses: right.totalExpenses },
+          metric,
+        ) -
+        metricSortValue(
+          { income: left.totalIncome, salary: 0, expenses: left.totalExpenses },
+          metric,
+        ),
+      );
+
+      const chartRows = selectedEntityIds?.length
+        ? summary
+        : summary.slice(0, MAX_PERFORMANCE_CHART_ENTITIES);
+      const chart = {
+        labels: dateLabels,
+        series: chartRows.map((row) => ({
+          key: `bus_${row.id}_${metric}`,
+          label: `${row.registrationNumber} - ${metricLabel(metric)}`,
+          metric,
+          entityId: row.id,
+          values: dateLabels.map((date) => row.dailyValues.get(date)?.[metric] ?? 0),
+        })),
+      };
+
+      return {
+        data: {
+          filters,
+          summary: summary.map(({ dailyValues, ...row }) => row),
+          chart,
+        },
+      };
+    }
+
+    const summaryMap = new Map<string, {
+      id: string;
+      name: string;
+      role: string;
+      workingDays: number;
+      incomeOnWorkingDays: number;
+      salary: number;
+      expensesOnWorkingDays: number;
+      workingDayKeys: Set<string>;
+      dailyValues: Map<string, Record<PerformanceMetric, number>>;
+    }>();
+
+    for (const assignment of assignments) {
+      const staffId = query.category === 'DRIVERS' ? assignment.driverStaffId : assignment.conductorStaffId;
+      const staff = query.category === 'DRIVERS' ? assignment.driver : assignment.conductor;
+      if (!staffId || !staff) continue;
+
+      const dayKey = formatDayKey(assignment.assignmentDate);
+      const busDay = busDayMap.get(`${assignment.busId}|${dayKey}`);
+      const income = busDay?.totalIncome ?? 0;
+      const salary = query.category === 'DRIVERS' ? (busDay?.driverSalary ?? 0) : (busDay?.conductorSalary ?? 0);
+      const expenses = busDay?.totalExpenses ?? 0;
+
+      if (!summaryMap.has(staffId)) {
+        summaryMap.set(staffId, {
+          id: staff.id,
+          name: staff.fullName,
+          role: staff.roleType,
+          workingDays: 0,
+          incomeOnWorkingDays: 0,
+          salary: 0,
+          expensesOnWorkingDays: 0,
+          workingDayKeys: new Set(),
+          dailyValues: new Map(),
+        });
+      }
+
+      const summary = summaryMap.get(staffId)!;
+      if (!summary.workingDayKeys.has(dayKey)) {
+        summary.workingDayKeys.add(dayKey);
+        summary.workingDays += 1;
+      }
+
+      summary.incomeOnWorkingDays += income;
+      summary.salary += salary;
+      summary.expensesOnWorkingDays += expenses;
+
+      const daily = summary.dailyValues.get(dayKey) ?? { income: 0, salary: 0, expenses: 0 };
+      daily.income += income;
+      daily.salary += salary;
+      daily.expenses += expenses;
+      summary.dailyValues.set(dayKey, daily);
+    }
+
+    for (const staff of selectedStaff) {
+      if (summaryMap.has(staff.id)) continue;
+
+      summaryMap.set(staff.id, {
+        id: staff.id,
+        name: staff.fullName,
+        role: staff.roleType,
+        workingDays: 0,
+        incomeOnWorkingDays: 0,
+        salary: 0,
+        expensesOnWorkingDays: 0,
+        workingDayKeys: new Set(),
+        dailyValues: new Map(),
+      });
+    }
+
+    let summary = Array.from(summaryMap.values()).filter((row) => {
+      if (selectedEntityIds?.length) return selectedEntityIds.includes(row.id);
+      return row.workingDays > 0 || row.incomeOnWorkingDays > 0 || row.salary > 0 || row.expensesOnWorkingDays > 0;
+    });
+
+    summary.sort((left, right) =>
+      metricSortValue(
+        { income: right.incomeOnWorkingDays, salary: right.salary, expenses: right.expensesOnWorkingDays },
+        metric,
+      ) -
+      metricSortValue(
+        { income: left.incomeOnWorkingDays, salary: left.salary, expenses: left.expensesOnWorkingDays },
+        metric,
+      ),
+    );
+
+    const entityPrefix = query.category === 'DRIVERS' ? 'driver' : 'conductor';
+    const chartRows = selectedEntityIds?.length
+      ? summary
+      : summary.slice(0, MAX_PERFORMANCE_CHART_ENTITIES);
+    const chart = {
+      labels: dateLabels,
+      series: chartRows.map((row) => ({
+        key: `${entityPrefix}_${row.id}_${metric}`,
+        label: `${row.name} - ${metricLabel(metric)}`,
+        metric,
+        entityId: row.id,
+        values: dateLabels.map((date) => row.dailyValues.get(date)?.[metric] ?? 0),
+      })),
+    };
+
+    return {
+      data: {
+        filters,
+        summary: summary.map(({ workingDayKeys, dailyValues, ...row }) => row),
+        chart,
+      },
+    };
+  }
+
+  async getDashboardReport(companyId: string, query: ReportQueryDto) {
+    const range = resolveDateRange(query);
+
+    const [buses, staff, trips, operationalExpenses, operationalIncomes] = await Promise.all([
+      this.prisma.bus.findMany({
+        where: { companyId, isActive: true },
+        select: {
+          id: true,
+          registrationNumber: true,
+          busName: true,
+          status: true,
+          route: {
+            select: {
+              id: true,
+              routeCode: true,
+              routeName: true,
+              startLocation: true,
+              endLocation: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.staffProfile.findMany({
+        where: { companyId, isActive: true },
+        select: { roleType: true },
+      }),
+      this.prisma.trip.findMany({
+        where: {
+          companyId,
+          tripDate: { gte: range.start, lt: range.end },
+        },
+        select: {
+          id: true,
+          busId: true,
+          tripNumber: true,
+          status: true,
+          route: {
+            select: {
+              id: true,
+              routeCode: true,
+              routeName: true,
+              startLocation: true,
+              endLocation: true,
+            },
+          },
+        },
+        orderBy: [{ tripDate: 'asc' }, { tripNumber: 'asc' }],
+      }),
+      this.prisma.operationalExpense.findMany({
+        where: {
+          companyId,
+          recordDate: { gte: range.start, lt: range.end },
+        },
+        select: {
+          busId: true,
+          category: true,
+          amount: true,
+        },
+      }),
+      this.prisma.operationalIncome.findMany({
+        where: {
+          companyId,
+          recordDate: { gte: range.start, lt: range.end },
+        },
+        select: {
+          busId: true,
+          amount: true,
+        },
+      }),
+    ]);
+
+    const tripIds = trips.map((trip) => trip.id);
+    const [tripIncomeSums, tripExtraIncomeSums, tripExpenses] = tripIds.length
+      ? await Promise.all([
+          this.prisma.tripIncome.groupBy({
+            by: ['tripId'],
+            where: { tripId: { in: tripIds } },
+            _sum: { amount: true },
+          }),
+          this.prisma.extraIncome.groupBy({
+            by: ['tripId'],
+            where: { tripId: { in: tripIds } },
+            _sum: { amount: true },
+          }),
+          this.prisma.tripExpense.findMany({
+            where: { tripId: { in: tripIds } },
+            select: {
+              tripId: true,
+              expenseCategory: true,
+              amount: true,
+            },
+          }),
+        ])
+      : [[], [], []];
+
+    const tripIncomeByTripId = new Map<string, number>(
+      tripIncomeSums.map((row) => [row.tripId, decimalToNumber(row._sum.amount)]),
+    );
+    const tripExtraIncomeByTripId = new Map<string, number>(
+      tripExtraIncomeSums.map((row) => [row.tripId, decimalToNumber(row._sum.amount)]),
+    );
+    const tripExpenseByTripId = new Map<string, number>();
+    const expenseBreakdown = new Map<DashboardExpenseCategory, number>(
+      buildEmptyExpenseBreakdown().map((row) => [row.category, 0]),
+    );
+
+    for (const expense of tripExpenses) {
+      const amount = decimalToNumber(expense.amount);
+      tripExpenseByTripId.set(
+        expense.tripId,
+        (tripExpenseByTripId.get(expense.tripId) ?? 0) + amount,
+      );
+
+      const category = mapExpenseCategoryToDashboard(expense.expenseCategory) as DashboardExpenseCategory;
+      expenseBreakdown.set(category, (expenseBreakdown.get(category) ?? 0) + amount);
+    }
+
+    const operationalExpenseByBusId = new Map<string, number>();
+    for (const expense of operationalExpenses) {
+      const amount = decimalToNumber(expense.amount);
+      operationalExpenseByBusId.set(
+        expense.busId,
+        (operationalExpenseByBusId.get(expense.busId) ?? 0) + amount,
+      );
+
+      const category = mapExpenseCategoryToDashboard(expense.category) as DashboardExpenseCategory;
+      expenseBreakdown.set(category, (expenseBreakdown.get(category) ?? 0) + amount);
+    }
+
+    const operationalIncomeByBusId = new Map<string, number>();
+    for (const income of operationalIncomes) {
+      const amount = decimalToNumber(income.amount);
+      operationalIncomeByBusId.set(
+        income.busId,
+        (operationalIncomeByBusId.get(income.busId) ?? 0) + amount,
+      );
+    }
+
+    const fleetByBusId = new Map(
+      buses.map((bus) => [
+        bus.id,
+        {
+          busId: bus.id,
+          registrationNumber: bus.registrationNumber,
+          routeName: bus.route?.routeName ?? null,
+          routeCode: bus.route?.routeCode ?? null,
+          status: bus.status,
+          route: bus.route,
+          currentTripStatus: null as 'IN_PROGRESS' | null,
+          tripCount: 0,
+          income: 0,
+          expense: operationalExpenseByBusId.get(bus.id) ?? 0,
+          badges: [] as DashboardFleetBadge[],
+          hasInProgressTrip: false,
+        },
+      ]),
+    );
+
+    for (const trip of trips) {
+      const tripIncome = tripIncomeByTripId.get(trip.id) ?? 0;
+      const tripExtraIncome = tripExtraIncomeByTripId.get(trip.id) ?? 0;
+      const tripExpense = tripExpenseByTripId.get(trip.id) ?? 0;
+      const fleetItem = fleetByBusId.get(trip.busId);
+
+      if (fleetItem) {
+        fleetItem.tripCount += 1;
+        fleetItem.income += tripIncome + tripExtraIncome;
+        fleetItem.expense += tripExpense;
+        if (!fleetItem.route && trip.route) fleetItem.route = trip.route;
+        if (trip.route) {
+          fleetItem.routeName = trip.route.routeName;
+          fleetItem.routeCode = trip.route.routeCode ?? null;
+        }
+        if (trip.status === 'IN_PROGRESS') {
+          fleetItem.hasInProgressTrip = true;
+          fleetItem.currentTripStatus = 'IN_PROGRESS';
+        }
+      }
+    }
+
+    const completedTrips = trips.filter((trip) => trip.status === 'COMPLETED').length;
+    const inProgressTrips = trips.filter((trip) => trip.status === 'IN_PROGRESS').length;
+    const totalTripIncome = Array.from(tripIncomeByTripId.values()).reduce((sum, amount) => sum + amount, 0);
+    const totalExtraIncome = Array.from(tripExtraIncomeByTripId.values()).reduce((sum, amount) => sum + amount, 0);
+    const totalTripExpenses = Array.from(tripExpenseByTripId.values()).reduce((sum, amount) => sum + amount, 0);
+    const totalOperationalExpenses = Array.from(operationalExpenseByBusId.values()).reduce((sum, amount) => sum + amount, 0);
+    const totalOperationalIncome = Array.from(operationalIncomeByBusId.values()).reduce((sum, amount) => sum + amount, 0);
+
+    const alerts: Array<{
+      id: string;
+      type: DashboardAlertType;
+      severity: DashboardAlertSeverity;
+      title: string;
+      message: string;
+      targetPage: string;
+      targetPath: string;
+    }> = [];
+
+    for (const fleetItem of fleetByBusId.values()) {
+      if (fleetItem.hasInProgressTrip) {
+        alerts.push({
+          id: `trip-${fleetItem.busId}`,
+          type: 'trip_in_progress',
+          severity: 'info',
+          title: `${fleetItem.registrationNumber} trip still in progress`,
+          message: 'Awaiting completion and income entry.',
+          targetPage: '/trips',
+          targetPath: '/trips',
+        });
+      }
+
+      if (fleetItem.status === 'MAINTENANCE') {
+        alerts.push({
+          id: `maintenance-${fleetItem.busId}`,
+          type: 'maintenance',
+          severity: 'warning',
+          title: `${fleetItem.registrationNumber} in maintenance`,
+          message: 'No trips can be scheduled until the bus is available again.',
+          targetPage: '/buses',
+          targetPath: '/buses',
+        });
+      }
+
+      if (fleetItem.hasInProgressTrip) fleetItem.badges.push('On Trip');
+      if (fleetItem.status === 'ACTIVE') fleetItem.badges.push('Active');
+      if (fleetItem.status === 'MAINTENANCE') fleetItem.badges.push('Maintenance');
+      if (fleetItem.status === 'INACTIVE') fleetItem.badges.push('Inactive');
+
+      fleetItem.income += operationalIncomeByBusId.get(fleetItem.busId) ?? 0;
+    }
+
+    const activeBuses = buses.filter((bus) => bus.status === 'ACTIVE').length;
+    const drivers = staff.filter(
+      (member) => member.roleType === 'DRIVER' || member.roleType === 'DRIVER_CONDUCTOR',
+    ).length;
+    const conductors = staff.filter(
+      (member) => member.roleType === 'CONDUCTOR' || member.roleType === 'DRIVER_CONDUCTOR',
+    ).length;
+
+    return {
+      dateRange: {
+        startDate: range.start.toISOString().slice(0, 10),
+        endDate: new Date(range.end.getTime() - 86_400_000).toISOString().slice(0, 10),
+        label: range.label,
+        isSingleDay: range.label.includes('–') === false,
+      },
+      summary: {
+        totalIncome: totalTripIncome + totalExtraIncome + totalOperationalIncome,
+        totalExpenses: totalTripExpenses + totalOperationalExpenses,
+        netDTI:
+          totalTripIncome +
+          totalExtraIncome +
+          totalOperationalIncome -
+          totalTripExpenses -
+          totalOperationalExpenses,
+        tripsCompleted: completedTrips,
+        totalTrips: trips.length,
+        activeTrips: inProgressTrips,
+        inProgressTrips,
+        dtiLabel: 'Net DTI',
+        dtiDescription: 'Daily Total Income after deducting expenses',
+      },
+      fleetStatus: {
+        items: Array.from(fleetByBusId.values()),
+        viewAllPath: '/buses',
+      },
+      quickStats: {
+        activeBuses,
+        drivers,
+        conductors,
+        passengersToday: null,
+      },
+      alerts,
+      expenseBreakdown: Array.from(expenseBreakdown.entries()).map(([category, amount]) => ({
+        category,
+        amount,
+      })),
+    };
+  }
 
   // ── 1. Income report ───────────────────────────────────────────────────────
 

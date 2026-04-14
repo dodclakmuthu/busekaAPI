@@ -3,12 +3,27 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CompanyGuard } from '../company/guards/company.guard';
 import { GetCompany } from '../company/decorators/get-company.decorator';
 import { ReportsService } from './reports.service';
+import { PerformanceReportQueryDto } from './dto/performance-report-query.dto';
 import { ReportQueryDto } from './dto/report-query.dto';
 
 @UseGuards(JwtAuthGuard, CompanyGuard)
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
+
+  /**
+   * GET /reports/dashboard?date=YYYY-MM-DD
+   * GET /reports/dashboard?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+   *
+   * Single payload for the dashboard page.
+   */
+  @Get('dashboard')
+  getDashboard(
+    @GetCompany() company: { id: string },
+    @Query() query: ReportQueryDto,
+  ) {
+    return this.reportsService.getDashboardReport(company.id, query);
+  }
 
   /**
    * GET /reports/income?date=YYYY-MM-DD
@@ -78,5 +93,19 @@ export class ReportsController {
     @Query() query: ReportQueryDto,
   ) {
     return this.reportsService.getRouteReport(company.id, query);
+  }
+
+  /**
+    * GET /reports/performance?category=DRIVERS&metric=income&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&entityIds=<uuid>,<uuid>
+    * GET /reports/performance?category=BUSES&metric=expenses&date=YYYY-MM-DD
+   *
+    * Performance analytics for drivers, conductors, and buses with one graph metric at a time.
+   */
+  @Get('performance')
+  getPerformance(
+    @GetCompany() company: { id: string },
+    @Query() query: PerformanceReportQueryDto,
+  ) {
+    return this.reportsService.getPerformanceReport(company.id, query);
   }
 }

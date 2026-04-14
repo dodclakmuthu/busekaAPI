@@ -16,6 +16,7 @@ import {
   getBusinessDayRangeUtc,
   getSriLankaTodayYmd,
 } from '../common/business-day';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,7 +107,10 @@ function computeSalaries(
 
 @Injectable()
 export class SettlementsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   /**
    * GET /settlements?date=YYYY-MM-DD
@@ -558,7 +562,7 @@ export class SettlementsService {
 
     const bus = await this.prisma.bus.findFirst({
       where: { id: busId, companyId, isActive: true },
-      select: { id: true },
+      select: { id: true, registrationNumber: true },
     });
     if (!bus) throw new NotFoundException(`Bus ${busId} not found`);
 
@@ -597,16 +601,33 @@ export class SettlementsService {
       approvedByUserId: lockedByUserId,
     };
 
-    await this.prisma.dailySummary.upsert({
-      where: { busId_summaryDate: { busId, summaryDate: dayRange.start } },
-      create: {
-        companyId,
-        busId,
-        assignmentId: assignment?.id ?? null,
-        summaryDate: dayRange.start,
-        ...sharedData,
-      },
-      update: sharedData,
+    await this.prisma.$transaction(async (tx) => {
+      await tx.dailySummary.upsert({
+        where: { busId_summaryDate: { busId, summaryDate: dayRange.start } },
+        create: {
+          companyId,
+          busId,
+          assignmentId: assignment?.id ?? null,
+          summaryDate: dayRange.start,
+          ...sharedData,
+        },
+        update: sharedData,
+      });
+
+      await this.notificationsService.createCompanyNotification(
+        {
+          companyId,
+          type: 'SETTLEMENT_LOCKED',
+          title: 'Settlement Locked',
+          message: `Settlement locked for ${bus.registrationNumber} on ${dto.date}. Net amount: Rs. ${detail.netProfit.toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          severity: 'SUCCESS',
+          relatedEntityType: 'SETTLEMENT',
+          relatedEntityId: `${busId}:${dto.date}`,
+          targetUrl: '/settlement',
+          metadata: { date: dto.date, busId, netProfit: detail.netProfit },
+        },
+        tx,
+      );
     });
 
     // Re-fetch so isLocked = true in the response

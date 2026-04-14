@@ -12,6 +12,7 @@ import { ListRouteRequestsQueryDto } from './dto/list-route-requests-query.dto';
 import { UpdateRouteRequestDto } from './dto/update-route-request.dto';
 import { ApproveRouteRequestDto } from './dto/approve-route-request.dto';
 import { RejectRouteRequestDto } from './dto/reject-route-request.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   buildApprovalSnapshotHash,
   buildRouteHistorySnapshot,
@@ -78,7 +79,10 @@ const ROUTE_HISTORY_INCLUDE = {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private decimalOrNull(value: Prisma.Decimal | number | string | null | undefined): number | null {
     if (value == null) return null;
@@ -690,6 +694,26 @@ export class AdminService {
 
       await this.createRouteHistory(tx, approvedRoute, RouteHistoryActionType.APPROVED, reviewerId, reviewerId);
 
+      await this.notificationsService.createCompanyNotification(
+        {
+          companyId: approvedRoute.companyId!,
+          type: 'ROUTE_APPROVED',
+          title: 'Route Approved',
+          message: `Route ${approvedRoute.routeCode ?? approvedRoute.routeName} was approved by admin.`,
+          severity: 'SUCCESS',
+          relatedEntityType: 'ROUTE',
+          relatedEntityId: approvedRoute.id,
+          targetUrl: '/routes',
+          metadata: {
+            routeId: approvedRoute.id,
+            routeCode: approvedRoute.routeCode,
+            routeName: approvedRoute.routeName,
+            approvalStatus: approvedRoute.approvalStatus,
+          },
+        },
+        tx,
+      );
+
       const globalRoute = globalRouteId
         ? await tx.route.findUnique({
             where: { id: globalRouteId },
@@ -737,6 +761,27 @@ export class AdminService {
       });
 
       await this.createRouteHistory(tx, route, RouteHistoryActionType.REJECTED, reviewerId, reviewerId);
+
+      await this.notificationsService.createCompanyNotification(
+        {
+          companyId: route.companyId!,
+          type: 'ROUTE_REJECTED',
+          title: 'Route Rejected',
+          message: `Route ${route.routeCode ?? route.routeName} was rejected by admin. Reason: ${dto.rejectionReason.trim()}`,
+          severity: 'ERROR',
+          relatedEntityType: 'ROUTE',
+          relatedEntityId: route.id,
+          targetUrl: '/routes',
+          metadata: {
+            routeId: route.id,
+            routeCode: route.routeCode,
+            routeName: route.routeName,
+            approvalStatus: route.approvalStatus,
+            rejectionReason: dto.rejectionReason.trim(),
+          },
+        },
+        tx,
+      );
 
       return route;
     });
