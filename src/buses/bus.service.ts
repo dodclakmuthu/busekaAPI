@@ -36,13 +36,21 @@ export class BusService {
     conductorPercentage?: Prisma.Decimal | null;
     fixedDriverWage?: Prisma.Decimal | null;
     fixedConductorWage?: Prisma.Decimal | null;
+    accessPins?: Array<{ id: string }>;
+    hasActivePin?: boolean;
   }>(bus: T) {
+    const { accessPins, hasActivePin, ...rest } = bus;
+
     return {
-      ...bus,
+      ...rest,
       driverPercentage: decimalToNumber(bus.driverPercentage) || null,
       conductorPercentage: decimalToNumber(bus.conductorPercentage) || null,
       fixedDriverWage: decimalToNumber(bus.fixedDriverWage) || null,
       fixedConductorWage: decimalToNumber(bus.fixedConductorWage) || null,
+      hasActivePin:
+        typeof hasActivePin === 'boolean'
+          ? hasActivePin
+          : Array.isArray(accessPins) && accessPins.length > 0,
     };
   }
 
@@ -84,6 +92,16 @@ export class BusService {
     routeName: true,
     routeCode: true,
     sourceType: true,
+  } as const;
+
+  private readonly busDetailsInclude = {
+    route: { select: this.routeSummarySelect },
+    accessPins: {
+      where: { isActive: true },
+      select: { id: true },
+      orderBy: { validFrom: 'desc' },
+      take: 1,
+    },
   } as const;
 
   private async validateDefaultDriver(staffId: string, companyId: string) {
@@ -142,7 +160,7 @@ export class BusService {
         fixedDriverWage: dto.fixedDriverWage != null ? new Prisma.Decimal(dto.fixedDriverWage) : null,
         fixedConductorWage: dto.fixedConductorWage != null ? new Prisma.Decimal(dto.fixedConductorWage) : null,
       },
-      include: { route: { select: this.routeSummarySelect } },
+      include: this.busDetailsInclude,
     });
 
     return { bus: this.mapBus(bus) };
@@ -152,7 +170,7 @@ export class BusService {
     const buses = await this.prisma.bus.findMany({
       where: { companyId, isActive: true },
       orderBy: { createdAt: 'desc' },
-      include: { route: { select: this.routeSummarySelect } },
+      include: this.busDetailsInclude,
     });
     return { buses: buses.map(b => this.mapBus(b)) };
   }
@@ -162,7 +180,7 @@ export class BusService {
     const buses = await this.prisma.bus.findMany({
       where: { companyId, isActive: true, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
-      include: { route: { select: this.routeSummarySelect } },
+      include: this.busDetailsInclude,
     });
     return { buses: buses.map(b => this.mapBus(b)) };
   }
@@ -170,7 +188,7 @@ export class BusService {
   async findOne(companyId: string, busId: string) {
     const bus = await this.prisma.bus.findFirst({
       where: { id: busId, companyId, isActive: true },
-      include: { route: { select: this.routeSummarySelect } },
+      include: this.busDetailsInclude,
     });
     if (!bus) throw new NotFoundException(`Bus ${busId} not found`);
     return { bus: this.mapBus(bus) };
@@ -243,7 +261,7 @@ export class BusService {
       ...(dto.fixedConductorWage !== undefined && { fixedConductorWage: dto.fixedConductorWage != null ? new Prisma.Decimal(dto.fixedConductorWage) : null }),
     };
 
-    const include = { route: { select: this.routeSummarySelect } };
+    const include = this.busDetailsInclude;
 
     const bus = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.bus.update({
@@ -262,7 +280,12 @@ export class BusService {
       return updated;
     });
 
-    return { bus: this.mapBus(bus) };
+    return {
+      bus: this.mapBus({
+        ...bus,
+        hasActivePin: dto.status === 'SOLD' ? false : undefined,
+      }),
+    };
   }
 
   /** PATCH /buses/:id/status */
@@ -275,9 +298,7 @@ export class BusService {
       const updated = await tx.bus.update({
         where: { id: busId },
         data: { status },
-        include: {
-          route: { select: this.routeSummarySelect },
-        },
+        include: this.busDetailsInclude,
       });
 
       if (status === 'SOLD') {
@@ -307,7 +328,12 @@ export class BusService {
       return updated;
     });
 
-    return { bus: this.mapBus(bus) };
+    return {
+      bus: this.mapBus({
+        ...bus,
+        hasActivePin: status === 'SOLD' ? false : undefined,
+      }),
+    };
   }
 
   // ── Operational (non-trip) finance records ───────────────────────────────
