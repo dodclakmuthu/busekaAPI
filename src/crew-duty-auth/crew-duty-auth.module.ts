@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { CrewDutyAuthController } from './crew-duty-auth.controller';
 import { CrewDutyAuthService } from './crew-duty-auth.service';
 import { CrewDutyJwtStrategy } from './crew-duty-jwt.strategy';
+import { LoginAttemptService } from '../common/login-attempt.service';
 
 @Module({
   imports: [
@@ -34,6 +35,6 @@ import { CrewDutyJwtStrategy } from './crew-duty-jwt.strategy';
     }),
   ],
   controllers: [CrewDutyAuthController],
-  providers: [CrewDutyAuthService, CrewDutyJwtStrategy],
+  providers: [CrewDutyAuthService, CrewDutyJwtStrategy, LoginAttemptService],
 })
 export class CrewDutyAuthModule {}
