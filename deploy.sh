@@ -14,13 +14,13 @@ if [ -z "${DATABASE_URL:-}" ] && [ ! -f .env ]; then
 fi
 
 echo "Installing dependencies..."
-yarn install --frozen-lockfile --production=false
+npm ci --legacy-peer-deps
 
 echo "Generating Prisma client..."
 ./node_modules/.bin/prisma generate
 
 echo "Building backend..."
-yarn build
+npm run build
 
 echo "Applying Prisma migrations..."
 ./node_modules/.bin/prisma migrate deploy
