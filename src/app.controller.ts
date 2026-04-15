@@ -5,17 +5,34 @@ import { PrismaService } from './prisma/prisma.service';
 export class AppController {
   constructor(private readonly prisma: PrismaService) {}
 
-  @Get('/test-db')
-  async testDb() {
+  @Get('/health')
+  async health() {
     try {
       const userCount = await this.prisma.user.count();
-      return { ok: true, model: 'User', count: userCount };
+
+      return {
+        ok: true,
+        status: 'healthy',
+        service: 'busapp-api',
+        timestamp: new Date().toISOString(),
+        db: {
+          ok: true,
+          model: 'User',
+          count: userCount,
+        },
+      };
     } catch (err) {
       throw new InternalServerErrorException({
         ok: false,
-        message: 'DB read failed',
+        status: 'unhealthy',
+        message: 'DB health check failed',
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  @Get('/test-db')
+  async testDb() {
+    return this.health();
   }
 }
