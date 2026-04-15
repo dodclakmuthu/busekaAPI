@@ -26,3 +26,7 @@ echo "Applying Prisma migrations..."
 ./node_modules/.bin/prisma migrate deploy
 
 echo "Deploy preparation complete."
+
+echo "Restarting busapp-api service..."
+
+sudo systemctl restart busapp-api
