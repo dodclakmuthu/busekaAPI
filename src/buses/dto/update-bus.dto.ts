@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 import { BusStatus, WageModel } from '@prisma/client';
 
 export class UpdateBusDto {
@@ -16,6 +16,14 @@ export class UpdateBusDto {
   @IsString()
   @MaxLength(40)
   ntcPermitNumber?: string;
+
+  @IsOptional()
+  @IsDateString()
+  permitExpiry?: string;
+
+  @IsOptional()
+  @IsDateString()
+  insuranceExpiry?: string;
 
   @IsOptional()
   @IsUUID()
@@ -61,4 +69,8 @@ export class UpdateBusDto {
   @IsNumber()
   @Min(0)
   fixedConductorWage?: number;
+
+  @IsOptional()
+  @IsString()
+  confirmationPin?: string;
 }

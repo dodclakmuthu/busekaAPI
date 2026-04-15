@@ -47,6 +47,36 @@ enum RouteDirection {
   @@schema("busapp")
 }
 
+enum RouteSourceType {
+  GLOBAL
+  COMPANY_PRIVATE
+  COMPANY_REQUEST
+
+  @@schema("busapp")
+}
+
+enum RouteApprovalStatus {
+  DRAFT
+  PRIVATE_ACTIVE
+  PENDING_APPROVAL
+  PENDING_UPDATE_APPROVAL
+  APPROVED
+  REJECTED
+  UPDATE_REJECTED
+
+  @@schema("busapp")
+}
+
+enum RouteHistoryActionType {
+  CREATED
+  UPDATED
+  SUBMITTED_FOR_APPROVAL
+  APPROVED
+  REJECTED
+
+  @@schema("busapp")
+}
+
 enum AssignmentStatus {
   ASSIGNED
   STARTED
@@ -100,6 +130,15 @@ enum WageModel {
   @@schema("busapp")
 }
 
+enum NotificationSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+
+  @@schema("busapp")
+}
+
 model User {
   id           String   @id @default(uuid())
   fullName     String
@@ -107,6 +146,7 @@ model User {
   email        String?  @unique
   passwordHash String
   isActive     Boolean  @default(true)
+  isAppAdmin   Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -115,6 +155,11 @@ model User {
   assignmentsCreated BusAssignment[] @relation("AssignedByUser")
   busPinsCreated     BusAccessPin[]  @relation("PinCreatedByUser")
   summariesApproved  DailySummary[]  @relation("SummaryApprovedByUser")
+  routesCreated      Route[]         @relation("RouteCreatedByUser")
+  routesReviewed     Route[]         @relation("RouteReviewedByUser")
+  routeHistoryChanges RouteHistory[] @relation("RouteHistoryChangedByUser")
+  routeHistoryReviews RouteHistory[] @relation("RouteHistoryReviewedByUser")
+  notifications      Notification[]  @relation("NotificationUser")
 
   @@schema("busapp")
 }
@@ -141,6 +186,7 @@ model Company {
   operationalIncomes  OperationalIncome[]
   summaries     DailySummary[]
   settings      CompanySettings?
+  notifications Notification[]
 
   @@schema("busapp")
 }
@@ -190,22 +236,74 @@ model StaffProfile {
 
 model Route {
   id            String   @id @default(uuid())
-  companyId     String
+  companyId     String?
   routeCode     String?
   routeName     String
   startLocation String
   endLocation   String
+  description   String?
+  distanceKm    Decimal? @db.Decimal(8, 2)
+  downIsReverseOfUp Boolean @default(true)
+  sourceType    RouteSourceType @default(COMPANY_PRIVATE)
+  approvalStatus RouteApprovalStatus @default(PRIVATE_ACTIVE)
+  createdByUserId String?
+  reviewedByUserId String?
+  globalRouteId String?
+  approvedSnapshotHash String?
+  lastSubmittedAt DateTime?
+  lastApprovedAt DateTime?
+  requestedAt   DateTime?
+  reviewedAt    DateTime?
+  approvedAt    DateTime?
+  adminNotes    String?
+  rejectionReason String?
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company?    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("RouteCreatedByUser", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  reviewedBy User?    @relation("RouteReviewedByUser", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  globalRoute Route?   @relation("GlobalRouteLink", fields: [globalRouteId], references: [id], onDelete: SetNull)
+  linkedCompanyRoutes Route[] @relation("GlobalRouteLink")
   stops   RouteStop[]
+  history RouteHistory[]
   buses   Bus[]
   trips   Trip[]
 
   @@index([companyId])
+  @@index([createdByUserId])
+  @@index([reviewedByUserId])
+  @@index([globalRouteId])
+  @@index([sourceType])
+  @@index([approvalStatus])
   @@index([isActive])
+  @@schema("busapp")
+}
+
+model RouteHistory {
+  id              String                 @id @default(uuid())
+  routeId         String
+  versionNumber   Int
+  snapshotJson    Json
+  snapshotHash    String
+  actionType      RouteHistoryActionType
+  approvalStatus  RouteApprovalStatus
+  changedByUserId String?
+  reviewByUserId  String?
+  createdAt       DateTime               @default(now())
+
+  route         Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  changedByUser User?  @relation("RouteHistoryChangedByUser", fields: [changedByUserId], references: [id], onDelete: SetNull)
+  reviewedBy    User?  @relation("RouteHistoryReviewedByUser", fields: [reviewByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([routeId, versionNumber])
+  @@index([routeId])
+  @@index([changedByUserId])
+  @@index([reviewByUserId])
+  @@index([actionType])
+  @@index([approvalStatus])
+  @@index([createdAt])
   @@schema("busapp")
 }
 
@@ -224,7 +322,6 @@ model RouteStop {
   tripEnds   Trip[] @relation("TripEndStop")
 
   @@unique([routeId, direction, stopOrder])
-  @@unique([routeId, direction, stopName])
   @@index([routeId])
   @@index([direction])
   @@index([isActive])
@@ -237,6 +334,8 @@ model Bus {
   registrationNumber String
   busName            String?
   ntcPermitNumber    String?
+  permitExpiry       DateTime?
+  insuranceExpiry    DateTime?
   routeId            String?
   seatCount          Int?
   status             BusStatus @default(ACTIVE)
@@ -527,5 +626,33 @@ model CompanySettings {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
+  @@schema("busapp")
+}
+
+model Notification {
+  id                String               @id @default(uuid())
+  companyId         String
+  userId            String?
+  type              String
+  title             String
+  message           String
+  severity          NotificationSeverity @default(INFO)
+  relatedEntityType String?
+  relatedEntityId   String?
+  targetUrl         String?
+  isRead            Boolean              @default(false)
+  readAt            DateTime?
+  metadata          Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation("NotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([companyId, userId, isRead])
   @@schema("busapp")
 }

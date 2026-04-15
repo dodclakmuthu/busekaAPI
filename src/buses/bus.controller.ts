@@ -21,6 +21,7 @@ import { CreateBusDto } from './dto/create-bus.dto';
 import { UpdateBusDto } from './dto/update-bus.dto';
 import { BusPinService } from './bus-pin.service';
 import { SetBusPinDto } from './dto/set-bus-pin.dto';
+import { VerifyBusPinDto } from './dto/verify-bus-pin.dto';
 import { UpdateBusStatusDto } from './dto/update-bus-status.dto';
 import { CreateOperationalExpenseDto } from './dto/create-operational-expense.dto';
 import { CreateOperationalIncomeDto } from './dto/create-operational-income.dto';
@@ -120,6 +121,16 @@ export class BusController {
     @Req() req: AuthedCompanyRequest,
   ) {
     return this.busPinService.resetPin(company.id, id, req.user.id, dto);
+  }
+
+  /** POST /buses/:id/pin/verify */
+  @Post(':id/pin/verify')
+  verifyPin(
+    @GetCompany() company: { id: string },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerifyBusPinDto,
+  ) {
+    return this.busPinService.verifyPin(company.id, id, dto);
   }
 
   /** PATCH /buses/:id/status */

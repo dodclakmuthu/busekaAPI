@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBusDto } from './dto/create-bus.dto';
 import { UpdateBusDto } from './dto/update-bus.dto';
@@ -18,10 +19,14 @@ import {
 } from '../common/finance';
 import { CreateOperationalExpenseDto } from './dto/create-operational-expense.dto';
 import { CreateOperationalIncomeDto } from './dto/create-operational-income.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class BusService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -31,13 +36,21 @@ export class BusService {
     conductorPercentage?: Prisma.Decimal | null;
     fixedDriverWage?: Prisma.Decimal | null;
     fixedConductorWage?: Prisma.Decimal | null;
+    accessPins?: Array<{ id: string }>;
+    hasActivePin?: boolean;
   }>(bus: T) {
+    const { accessPins, hasActivePin, ...rest } = bus;
+
     return {
-      ...bus,
+      ...rest,
       driverPercentage: decimalToNumber(bus.driverPercentage) || null,
       conductorPercentage: decimalToNumber(bus.conductorPercentage) || null,
       fixedDriverWage: decimalToNumber(bus.fixedDriverWage) || null,
       fixedConductorWage: decimalToNumber(bus.fixedConductorWage) || null,
+      hasActivePin:
+        typeof hasActivePin === 'boolean'
+          ? hasActivePin
+          : Array.isArray(accessPins) && accessPins.length > 0,
     };
   }
 
@@ -53,13 +66,43 @@ export class BusService {
   /** Validate a routeId belongs to the same company (when supplied). */
   private async validateRoute(routeId: string, companyId: string) {
     const route = await this.prisma.route.findFirst({
-      where: { id: routeId, companyId, isActive: true },
+      where: {
+        id: routeId,
+        isActive: true,
+        OR: [
+          {
+            companyId,
+            sourceType: { not: 'GLOBAL' },
+          },
+          {
+            sourceType: 'GLOBAL',
+            approvalStatus: 'APPROVED',
+          },
+        ],
+      },
       select: { id: true },
     });
     if (!route) {
-      throw new NotFoundException(`Route ${routeId} not found in your company`);
+      throw new NotFoundException(`Route ${routeId} is not available for bus assignment`);
     }
   }
+
+  private readonly routeSummarySelect = {
+    id: true,
+    routeName: true,
+    routeCode: true,
+    sourceType: true,
+  } as const;
+
+  private readonly busDetailsInclude = {
+    route: { select: this.routeSummarySelect },
+    accessPins: {
+      where: { isActive: true },
+      select: { id: true },
+      orderBy: { validFrom: 'desc' },
+      take: 1,
+    },
+  } as const;
 
   private async validateDefaultDriver(staffId: string, companyId: string) {
     const staff = await this.prisma.staffProfile.findFirst({
@@ -106,6 +149,8 @@ export class BusService {
         registrationNumber: dto.registrationNumber,
         busName: dto.busName,
         ntcPermitNumber: dto.ntcPermitNumber,
+        permitExpiry: dto.permitExpiry ? new Date(dto.permitExpiry) : null,
+        insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null,
         routeId: dto.routeId ?? null,
         seatCount: dto.seatCount ?? null,
         status: dto.status ?? 'ACTIVE',
@@ -115,7 +160,7 @@ export class BusService {
         fixedDriverWage: dto.fixedDriverWage != null ? new Prisma.Decimal(dto.fixedDriverWage) : null,
         fixedConductorWage: dto.fixedConductorWage != null ? new Prisma.Decimal(dto.fixedConductorWage) : null,
       },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+      include: this.busDetailsInclude,
     });
 
     return { bus: this.mapBus(bus) };
@@ -125,7 +170,7 @@ export class BusService {
     const buses = await this.prisma.bus.findMany({
       where: { companyId, isActive: true },
       orderBy: { createdAt: 'desc' },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+      include: this.busDetailsInclude,
     });
     return { buses: buses.map(b => this.mapBus(b)) };
   }
@@ -135,7 +180,7 @@ export class BusService {
     const buses = await this.prisma.bus.findMany({
       where: { companyId, isActive: true, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+      include: this.busDetailsInclude,
     });
     return { buses: buses.map(b => this.mapBus(b)) };
   }
@@ -143,7 +188,7 @@ export class BusService {
   async findOne(companyId: string, busId: string) {
     const bus = await this.prisma.bus.findFirst({
       where: { id: busId, companyId, isActive: true },
-      include: { route: { select: { id: true, routeName: true, routeCode: true } } },
+      include: this.busDetailsInclude,
     });
     if (!bus) throw new NotFoundException(`Bus ${busId} not found`);
     return { bus: this.mapBus(bus) };
@@ -151,6 +196,25 @@ export class BusService {
 
   async update(companyId: string, busId: string, dto: UpdateBusDto) {
     await this.resolveBus(busId, companyId);
+
+    if (!dto.confirmationPin?.trim()) {
+      throw new BadRequestException('Bus PIN confirmation is required to edit this bus');
+    }
+
+    const activePin = await this.prisma.busAccessPin.findFirst({
+      where: { busId, isActive: true },
+      orderBy: { validFrom: 'desc' },
+      select: { pinHash: true },
+    });
+
+    if (!activePin) {
+      throw new BadRequestException('No active PIN is set for this bus');
+    }
+
+    const validPin = await bcrypt.compare(dto.confirmationPin, activePin.pinHash);
+    if (!validPin) {
+      throw new BadRequestException('Invalid bus PIN');
+    }
 
     if (dto.registrationNumber) {
       const duplicate = await this.prisma.bus.findFirst({
@@ -183,6 +247,8 @@ export class BusService {
       ...(dto.registrationNumber !== undefined && { registrationNumber: dto.registrationNumber }),
       ...(dto.busName !== undefined && { busName: dto.busName }),
       ...(dto.ntcPermitNumber !== undefined && { ntcPermitNumber: dto.ntcPermitNumber }),
+      ...(dto.permitExpiry !== undefined && { permitExpiry: dto.permitExpiry ? new Date(dto.permitExpiry) : null }),
+      ...(dto.insuranceExpiry !== undefined && { insuranceExpiry: dto.insuranceExpiry ? new Date(dto.insuranceExpiry) : null }),
       ...(dto.routeId !== undefined && { routeId: dto.routeId }),
       ...(dto.seatCount !== undefined && { seatCount: dto.seatCount }),
       ...(dto.status !== undefined && { status: dto.status }),
@@ -195,7 +261,7 @@ export class BusService {
       ...(dto.fixedConductorWage !== undefined && { fixedConductorWage: dto.fixedConductorWage != null ? new Prisma.Decimal(dto.fixedConductorWage) : null }),
     };
 
-    const include = { route: { select: { id: true, routeName: true, routeCode: true } } };
+    const include = this.busDetailsInclude;
 
     const bus = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.bus.update({
@@ -214,12 +280,17 @@ export class BusService {
       return updated;
     });
 
-    return { bus: this.mapBus(bus) };
+    return {
+      bus: this.mapBus({
+        ...bus,
+        hasActivePin: dto.status === 'SOLD' ? false : undefined,
+      }),
+    };
   }
 
   /** PATCH /buses/:id/status */
   async updateStatus(companyId: string, busId: string, status: BusStatus) {
-    await this.resolveBus(busId, companyId);
+    const existingBus = await this.resolveBus(busId, companyId);
 
     const now = new Date();
 
@@ -227,9 +298,7 @@ export class BusService {
       const updated = await tx.bus.update({
         where: { id: busId },
         data: { status },
-        include: {
-          route: { select: { id: true, routeName: true, routeCode: true } },
-        },
+        include: this.busDetailsInclude,
       });
 
       if (status === 'SOLD') {
@@ -239,10 +308,32 @@ export class BusService {
         });
       }
 
+      if (status === 'MAINTENANCE' && existingBus.status !== 'MAINTENANCE') {
+        await this.notificationsService.createCompanyNotification(
+          {
+            companyId,
+            type: 'BUS_MAINTENANCE',
+            title: 'Bus in Maintenance',
+            message: `${updated.registrationNumber} was moved to maintenance status.`,
+            severity: 'INFO',
+            relatedEntityType: 'BUS',
+            relatedEntityId: updated.id,
+            targetUrl: '/buses',
+            metadata: { status },
+          },
+          tx,
+        );
+      }
+
       return updated;
     });
 
-    return { bus: this.mapBus(bus) };
+    return {
+      bus: this.mapBus({
+        ...bus,
+        hasActivePin: status === 'SOLD' ? false : undefined,
+      }),
+    };
   }
 
   // ── Operational (non-trip) finance records ───────────────────────────────

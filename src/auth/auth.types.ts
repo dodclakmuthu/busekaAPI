@@ -4,6 +4,7 @@ export type SafeUser = {
   mobileNumber: string;
   email: string | null;
   isActive: boolean;
+  isAppAdmin: boolean;
   createdAt: Date;
   updatedAt: Date;
 };

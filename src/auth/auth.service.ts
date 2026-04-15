@@ -19,6 +19,7 @@ export class AuthService {
     mobileNumber: string;
     email: string | null;
     isActive: boolean;
+    isAppAdmin: boolean;
     createdAt: Date;
     updatedAt: Date;
   }): SafeUser {
@@ -28,6 +29,7 @@ export class AuthService {
       mobileNumber: user.mobileNumber,
       email: user.email,
       isActive: user.isActive,
+      isAppAdmin: user.isAppAdmin,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -73,6 +75,7 @@ export class AuthService {
         mobileNumber: true,
         email: true,
         isActive: true,
+        isAppAdmin: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -91,6 +94,7 @@ export class AuthService {
         email: true,
         passwordHash: true,
         isActive: true,
+        isAppAdmin: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -121,6 +125,7 @@ export class AuthService {
         mobileNumber: true,
         email: true,
         isActive: true,
+        isAppAdmin: true,
         createdAt: true,
         updatedAt: true,
       },
