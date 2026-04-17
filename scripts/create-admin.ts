@@ -13,10 +13,11 @@
  */
 
 import { config as loadEnv } from 'dotenv';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserAccountStatus } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcrypt';
 import * as readline from 'readline';
+import { getAuthMobileLookupVariants, INVALID_SRI_LANKAN_PHONE_MESSAGE, normalizeAuthMobileNumber } from '../src/auth/phone.util';
 
 loadEnv();
 
@@ -40,17 +41,35 @@ async function prompt(question: string): Promise<string> {
 
 async function main() {
   const mobile = arg('--mobile') ?? await prompt('Mobile number: ');
+  const normalizedMobile = normalizeAuthMobileNumber(mobile);
   const promoteOnly = hasFlag('--promote');
+
+  if (!normalizedMobile) {
+    console.error(INVALID_SRI_LANKAN_PHONE_MESSAGE);
+    process.exit(1);
+  }
 
   if (promoteOnly) {
     // Just set isAppAdmin = true on an existing user
-    const user = await prisma.user.findUnique({ where: { mobileNumber: mobile } });
+    const user = await prisma.user.findFirst({
+      where: { mobileNumber: { in: getAuthMobileLookupVariants(mobile) } },
+    });
     if (!user) {
       console.error(`No user found with mobile: ${mobile}`);
       process.exit(1);
     }
-    await prisma.user.update({ where: { id: user.id }, data: { isAppAdmin: true } });
-    console.log(`✅  Promoted "${user.fullName}" (${mobile}) to APP_ADMIN`);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isAppAdmin: true,
+        mobileNumber: normalizedMobile,
+        status: UserAccountStatus.ACTIVE,
+        isMobileVerified: true,
+        mobileVerifiedAt: user.mobileVerifiedAt ?? new Date(),
+        isActive: true,
+      },
+    });
+    console.log(`✅  Promoted "${user.fullName}" (${normalizedMobile}) to APP_ADMIN`);
     return;
   }
 
@@ -63,15 +82,26 @@ async function main() {
     process.exit(1);
   }
 
-  const existing = await prisma.user.findUnique({ where: { mobileNumber: mobile } });
+  const existing = await prisma.user.findFirst({
+    where: { mobileNumber: { in: getAuthMobileLookupVariants(mobile) } },
+  });
   if (existing) {
-    console.error(`A user with mobile ${mobile} already exists. Use --promote to grant admin access.`);
+    console.error(`A user with mobile ${normalizedMobile} already exists. Use --promote to grant admin access.`);
     process.exit(1);
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
-    data: { fullName, mobileNumber: mobile, passwordHash, isActive: true, isAppAdmin: true },
+    data: {
+      fullName,
+      mobileNumber: normalizedMobile,
+      passwordHash,
+      status: UserAccountStatus.ACTIVE,
+      isMobileVerified: true,
+      mobileVerifiedAt: new Date(),
+      isActive: true,
+      isAppAdmin: true,
+    },
   });
 
   console.log(`✅  APP_ADMIN account created:`);
