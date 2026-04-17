@@ -7,7 +7,15 @@ Minimal NestJS backend with a single `GET /` route.
 ## Environment (.env)
 
 - Copy `.env.example` to `.env`.
-- Supported variable: `PORT` (defaults to `3000`).
+- Supported variables:
+	- `PORT` (defaults to `3000`)
+	- `JWT_ACCESS_SECRET`
+	- `JWT_ACCESS_TTL_SECONDS`
+	- `TEXTLK_API_TOKEN`
+	- `TEXTLK_SENDER_ID`
+	- `TEXTLK_SMS_ENDPOINT`
+
+`TEXTLK_API_TOKEN` is required in production for OTP delivery. In non-production, if it is missing, the backend logs the OTP code instead of sending SMS so the signup flow remains testable locally.
 
 ```bash
 cd backend

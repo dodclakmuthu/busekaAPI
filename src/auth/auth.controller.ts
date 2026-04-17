@@ -2,11 +2,14 @@ import { Body, Controller, Get, Post, Req, Res, UnauthorizedException, UseGuards
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { ResendSignupOtpDto } from './dto/resend-signup-otp.dto';
 import { SignupDto } from './dto/signup.dto';
+import { VerifySignupOtpDto } from './dto/verify-signup-otp.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { SafeUser } from './auth.types';
 import { DASHBOARD_AUTH_COOKIE, getAuthCookieOptions } from './auth-cookie';
 import { LoginAttemptService } from '../common/login-attempt.service';
+import { normalizeAuthMobileNumber } from './phone.util';
 
 type AuthedRequest = Request & { user?: SafeUser };
 
@@ -22,13 +25,34 @@ export class AuthController {
     return this.authService.signup(dto);
   }
 
+  @Post('signup/start')
+  async signupStart(@Body() dto: SignupDto) {
+    return this.authService.signup(dto);
+  }
+
+  @Post('signup/verify')
+  async verifySignup(
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: VerifySignupOtpDto,
+  ) {
+    const result = await this.authService.verifySignupOtp(dto);
+    res.cookie(DASHBOARD_AUTH_COOKIE, result.accessToken, getAuthCookieOptions());
+    return { user: result.user };
+  }
+
+  @Post('signup/resend')
+  async resendSignupOtp(@Body() dto: ResendSignupOtpDto) {
+    return this.authService.resendSignupOtp(dto);
+  }
+
   @Post('login')
   async login(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body() dto: LoginDto,
   ) {
-    const key = `dashboard:${req.ip ?? 'unknown'}:${dto.mobileNumber.trim()}`;
+    const normalizedMobileKey = normalizeAuthMobileNumber(dto.mobileNumber) ?? dto.mobileNumber.trim();
+    const key = `dashboard:${req.ip ?? 'unknown'}:${normalizedMobileKey}`;
     this.loginAttempts.assertAllowed(key);
 
     try {

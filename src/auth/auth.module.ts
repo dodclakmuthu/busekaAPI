@@ -6,6 +6,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { LoginAttemptService } from '../common/login-attempt.service';
+import { TextlkSmsService } from './textlk-sms.service';
 
 @Module({
   imports: [
@@ -29,7 +30,7 @@ import { LoginAttemptService } from '../common/login-attempt.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LoginAttemptService],
+  providers: [AuthService, JwtStrategy, LoginAttemptService, TextlkSmsService],
   exports: [AuthService],
 })
 export class AuthModule {}

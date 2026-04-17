@@ -46,12 +46,17 @@ export class CompanyService {
       );
     }
 
+    const owner = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { mobileNumber: true },
+    });
+
     const company = await this.prisma.company.create({
       data: {
         name: dto.name,
         ownerUserId: userId,
         businessType: dto.businessType ?? 'individual_owner',
-        mobileNumber: dto.mobileNumber ?? null,
+        mobileNumber: dto.mobileNumber ?? owner?.mobileNumber ?? null,
         address: dto.address ?? null,
         isActive: true,
       },
