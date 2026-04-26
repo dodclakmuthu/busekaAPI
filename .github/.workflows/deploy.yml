@@ -1,0 +1,28 @@
+name: Deploy Dev API
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+      - name: Add EC2 host
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H 35.154.87.228 >> ~/.ssh/known_hosts
+
+      - name: Run deploy script
+        run: |
+          ssh ubuntu@35.154.87.228 'bash /var/www/devapi-buseka.lk/deploy.sh'
