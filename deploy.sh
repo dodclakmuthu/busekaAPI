@@ -38,7 +38,16 @@ u = urlparse(os.environ['DATABASE_URL'])
 q = {k: v[0] for k, v in parse_qs(u.query).items() if k not in ('schema', 'pgbouncer', 'uselibpqcompat')}
 print(urlunparse(u._replace(query=urlencode(q))))
 ")
-psql "$PSQL_URL" -c "CREATE SCHEMA IF NOT EXISTS busapp;"
+if ! psql "$PSQL_URL" -c "CREATE SCHEMA IF NOT EXISTS busapp;"; then
+	echo "Could not create schema with current DB user. Checking if schema already exists..."
+	if psql "$PSQL_URL" -tAc "SELECT 1 FROM pg_namespace WHERE nspname = 'busapp'" | grep -q "1"; then
+		echo "Schema busapp already exists. Continuing deployment."
+	else
+		echo "Schema busapp does not exist and DB user lacks permission to create it."
+		echo "Ask your DB admin to run once: CREATE SCHEMA IF NOT EXISTS busapp AUTHORIZATION <db_user>;"
+		exit 1
+	fi
+fi
 
 echo "Applying Prisma migrations..."
 ./node_modules/.bin/prisma migrate deploy
