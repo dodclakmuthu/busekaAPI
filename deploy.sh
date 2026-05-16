@@ -75,7 +75,17 @@ elif systemctl list-unit-files | grep -q '^busapp-api\.service'; then
 	sudo systemctl restart busapp-api
 elif command -v pm2 >/dev/null 2>&1; then
 	echo "Restarting PM2 app: buseka-api"
-	pm2 restart buseka-api || pm2 restart busapp-api
+	if pm2 restart buseka-api; then
+		echo "PM2 app buseka-api restarted."
+	elif pm2 restart busapp-api; then
+		echo "PM2 app busapp-api restarted."
+	elif [ -f ecosystem.config.js ]; then
+		echo "PM2 app not found. Starting from ecosystem.config.js..."
+		pm2 start ecosystem.config.js --only buseka-api || pm2 start ecosystem.config.js --only busapp-api
+	else
+		echo "PM2 app not found and ecosystem.config.js is missing."
+		exit 1
+	fi
 else
 	echo "No known service manager target found. Restart manually."
 	exit 1
