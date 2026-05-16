@@ -30,8 +30,11 @@ echo "Generating Prisma client..."
 echo "Building backend..."
 npm run build
 
+# Prefer DIRECT_URL (admin user) for migration operations when available.
+MIGRATION_BASE_URL="${DIRECT_URL:-$DATABASE_URL}"
+
 echo "Ensuring busapp schema exists..."
-PSQL_URL=$(DATABASE_URL="$DATABASE_URL" python3 -c "
+PSQL_URL=$(DATABASE_URL="$MIGRATION_BASE_URL" python3 -c "
 import os
 from urllib.parse import urlparse, urlencode, urlunparse, parse_qs
 u = urlparse(os.environ['DATABASE_URL'])
@@ -50,7 +53,7 @@ if ! psql "$PSQL_URL" -c "CREATE SCHEMA IF NOT EXISTS busapp;"; then
 fi
 
 echo "Applying Prisma migrations..."
-MIGRATE_DATABASE_URL=$(DATABASE_URL="$DATABASE_URL" python3 -c "
+MIGRATE_DATABASE_URL=$(DATABASE_URL="$MIGRATION_BASE_URL" python3 -c "
 import os
 from urllib.parse import urlparse, urlencode, urlunparse, parse_qs
 u = urlparse(os.environ['DATABASE_URL'])
