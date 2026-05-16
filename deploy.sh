@@ -31,7 +31,13 @@ echo "Building backend..."
 npm run build
 
 echo "Ensuring busapp schema exists..."
-PSQL_URL=$(echo "$DATABASE_URL" | sed 's/[?&]schema=[^&]*//;s/[?&]pgbouncer=[^&]*//')
+PSQL_URL=$(DATABASE_URL="$DATABASE_URL" python3 -c "
+import os
+from urllib.parse import urlparse, urlencode, urlunparse, parse_qs
+u = urlparse(os.environ['DATABASE_URL'])
+q = {k: v[0] for k, v in parse_qs(u.query).items() if k not in ('schema', 'pgbouncer', 'uselibpqcompat')}
+print(urlunparse(u._replace(query=urlencode(q))))
+")
 psql "$PSQL_URL" -c "CREATE SCHEMA IF NOT EXISTS busapp;"
 
 echo "Applying Prisma migrations..."
