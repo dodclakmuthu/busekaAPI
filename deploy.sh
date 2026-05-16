@@ -65,6 +65,18 @@ DATABASE_URL="$MIGRATE_DATABASE_URL" ./node_modules/.bin/prisma migrate deploy
 
 echo "Deploy preparation complete."
 
-echo "Restarting buseka-api service..."
+echo "Restarting application process..."
 
-sudo systemctl restart buseka-api
+if systemctl list-unit-files | grep -q '^buseka-api\.service'; then
+	echo "Restarting systemd unit: buseka-api"
+	sudo systemctl restart buseka-api
+elif systemctl list-unit-files | grep -q '^busapp-api\.service'; then
+	echo "Restarting systemd unit: busapp-api"
+	sudo systemctl restart busapp-api
+elif command -v pm2 >/dev/null 2>&1; then
+	echo "Restarting PM2 app: buseka-api"
+	pm2 restart buseka-api || pm2 restart busapp-api
+else
+	echo "No known service manager target found. Restart manually."
+	exit 1
+fi
