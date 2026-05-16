@@ -31,7 +31,8 @@ echo "Building backend..."
 npm run build
 
 echo "Ensuring busapp schema exists..."
-psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS busapp;"
+PSQL_URL=$(echo "$DATABASE_URL" | sed 's/[?&]schema=[^&]*//;s/[?&]pgbouncer=[^&]*//')
+psql "$PSQL_URL" -c "CREATE SCHEMA IF NOT EXISTS busapp;"
 
 echo "Applying Prisma migrations..."
 ./node_modules/.bin/prisma migrate deploy
