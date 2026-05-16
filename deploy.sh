@@ -50,7 +50,15 @@ if ! psql "$PSQL_URL" -c "CREATE SCHEMA IF NOT EXISTS busapp;"; then
 fi
 
 echo "Applying Prisma migrations..."
-./node_modules/.bin/prisma migrate deploy
+MIGRATE_DATABASE_URL=$(DATABASE_URL="$DATABASE_URL" python3 -c "
+import os
+from urllib.parse import urlparse, urlencode, urlunparse, parse_qs
+u = urlparse(os.environ['DATABASE_URL'])
+q = {k: v[0] for k, v in parse_qs(u.query).items() if k not in ('schema',)}
+q['schema'] = 'busapp'
+print(urlunparse(u._replace(query=urlencode(q))))
+")
+DATABASE_URL="$MIGRATE_DATABASE_URL" ./node_modules/.bin/prisma migrate deploy
 
 echo "Deploy preparation complete."
 
