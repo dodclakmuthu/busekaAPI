@@ -22,6 +22,9 @@ echo "Generating Prisma client..."
 echo "Building backend..."
 npm run build
 
+echo "Ensuring busapp schema exists..."
+psql "$DATABASE_URL" -c "CREATE SCHEMA IF NOT EXISTS busapp;"
+
 echo "Applying Prisma migrations..."
 ./node_modules/.bin/prisma migrate deploy
 
