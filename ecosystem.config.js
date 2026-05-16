@@ -1,9 +1,9 @@
 module.exports = {
   apps: [
     {
-      name: 'devapi-buseka',
+      name: 'buseka-api',
       script: 'dist/main.js',
-      cwd: '/var/www/devapi-buseka.lk',
+      cwd: '/var/www/buseka-api',
       env: {
         NODE_ENV: 'production',
         PORT: 3002

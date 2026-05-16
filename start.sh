@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 set -a
-source /var/www/dev-busapp-api/.env
+source /var/www/buseka-api/.env
 set +a
 
-exec /usr/bin/node /var/www/dev-busapp-api/dist/main.js
+exec /usr/bin/node /var/www/buseka-api/dist/main.js

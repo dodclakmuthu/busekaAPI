@@ -13,6 +13,14 @@ if [ -z "${DATABASE_URL:-}" ] && [ ! -f .env ]; then
 	exit 1
 fi
 
+# Load .env into shell if DATABASE_URL is not already exported
+if [ -z "${DATABASE_URL:-}" ] && [ -f .env ]; then
+	set -a
+	# shellcheck disable=SC1091
+	source .env
+	set +a
+fi
+
 echo "Installing dependencies..."
 npm ci --legacy-peer-deps
 
@@ -30,6 +38,6 @@ echo "Applying Prisma migrations..."
 
 echo "Deploy preparation complete."
 
-echo "Restarting busapp-api service..."
+echo "Restarting buseka-api service..."
 
-sudo systemctl restart busapp-api
+sudo systemctl restart buseka-api
