@@ -8,17 +8,18 @@ if [ ! -f package.json ]; then
 	exit 1
 fi
 
-if [ -z "${DATABASE_URL:-}" ] && [ ! -f .env ]; then
-	echo "DATABASE_URL is not set and .env is missing"
-	exit 1
-fi
-
-# Load .env into shell if DATABASE_URL is not already exported
-if [ -z "${DATABASE_URL:-}" ] && [ -f .env ]; then
+# Always load .env if present so runtime and PM2 get the latest values.
+if [ -f .env ]; then
+	echo "Loading environment from .env..."
 	set -a
 	# shellcheck disable=SC1091
 	source .env
 	set +a
+fi
+
+if [ -z "${DATABASE_URL:-}" ]; then
+	echo "DATABASE_URL is not set. Provide it in shell or .env"
+	exit 1
 fi
 
 echo "Installing dependencies..."
@@ -75,17 +76,18 @@ elif systemctl list-unit-files | grep -q '^busapp-api\.service'; then
 	sudo systemctl restart busapp-api
 elif command -v pm2 >/dev/null 2>&1; then
 	echo "Restarting PM2 app: buseka-api"
-	if pm2 restart buseka-api; then
+	if pm2 restart buseka-api --update-env; then
 		echo "PM2 app buseka-api restarted."
-	elif pm2 restart busapp-api; then
+	elif pm2 restart busapp-api --update-env; then
 		echo "PM2 app busapp-api restarted."
 	elif [ -f ecosystem.config.js ]; then
 		echo "PM2 app not found. Starting from ecosystem.config.js..."
-		pm2 start ecosystem.config.js --only buseka-api || pm2 start ecosystem.config.js --only busapp-api
+		pm2 start ecosystem.config.js --only buseka-api --update-env || pm2 start ecosystem.config.js --only busapp-api --update-env
 	else
 		echo "PM2 app not found and ecosystem.config.js is missing."
 		exit 1
 	fi
+	pm2 save >/dev/null 2>&1 || true
 else
 	echo "No known service manager target found. Restart manually."
 	exit 1
