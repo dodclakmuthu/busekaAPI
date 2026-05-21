@@ -68,27 +68,22 @@ echo "Deploy preparation complete."
 
 echo "Restarting application process..."
 
-if systemctl list-unit-files | grep -q '^buseka-api\.service'; then
-	echo "Restarting systemd unit: buseka-api"
-	sudo systemctl restart buseka-api
-elif systemctl list-unit-files | grep -q '^busapp-api\.service'; then
-	echo "Restarting systemd unit: busapp-api"
-	sudo systemctl restart busapp-api
-elif command -v pm2 >/dev/null 2>&1; then
-	echo "Restarting PM2 app: buseka-api"
-	if pm2 restart buseka-api --update-env; then
-		echo "PM2 app buseka-api restarted."
-	elif pm2 restart busapp-api --update-env; then
-		echo "PM2 app busapp-api restarted."
-	elif [ -f ecosystem.config.js ]; then
-		echo "PM2 app not found. Starting from ecosystem.config.js..."
-		pm2 start ecosystem.config.js --only buseka-api --update-env || pm2 start ecosystem.config.js --only busapp-api --update-env
-	else
-		echo "PM2 app not found and ecosystem.config.js is missing."
-		exit 1
-	fi
-	pm2 save >/dev/null 2>&1 || true
-else
-	echo "No known service manager target found. Restart manually."
+if ! command -v pm2 >/dev/null 2>&1; then
+	echo "PM2 is not installed on this host. Install PM2 before deploying."
 	exit 1
 fi
+
+echo "Restarting PM2 app: buseka-api"
+if pm2 restart buseka-api --update-env; then
+	echo "PM2 app buseka-api restarted."
+elif pm2 restart busapp-api --update-env; then
+	echo "PM2 app busapp-api restarted."
+elif [ -f ecosystem.config.js ]; then
+	echo "PM2 app not found. Starting from ecosystem.config.js..."
+	pm2 start ecosystem.config.js --only buseka-api --update-env || pm2 start ecosystem.config.js --only busapp-api --update-env
+else
+	echo "PM2 app not found and ecosystem.config.js is missing."
+	exit 1
+fi
+
+pm2 save >/dev/null 2>&1 || true
