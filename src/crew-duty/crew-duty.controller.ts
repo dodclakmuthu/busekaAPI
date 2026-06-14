@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Patch,
   Post,
   Query,
   Req,
@@ -13,6 +14,7 @@ import type { CrewDutySession } from '../crew-duty-auth/crew-duty-auth.types';
 import { CrewDutyService } from './crew-duty.service';
 import { TripsService } from '../trips/trips.service';
 import { TripSummaryQueryDto } from '../trips/dto/trip-summary-query.dto';
+import { CrewDutySummaryQueryDto } from './dto/crew-duty-summary-query.dto';
 import { StartTripDto } from './dto/start-trip.dto';
 import { StaffOptionsQueryDto } from './dto/staff-options-query.dto';
 import { CreateExtraIncomeDto } from './dto/create-extra-income.dto';
@@ -59,9 +61,15 @@ export class CrewDutyController {
    *  using crew-duty session (so mobile app can poll for active trip + summary).
    */
   @Get('summary')
-  summary(@Req() req: { user: CrewDutySession }, @Query() query: TripSummaryQueryDto) {
+  summary(
+    @Req() req: { user: CrewDutySession },
+    @Query() query: CrewDutySummaryQueryDto,
+  ) {
     // Ensure busId is always the crew's bus
-    const q = { ...(query as any), busId: req.user.busId } as TripSummaryQueryDto;
+    const q: TripSummaryQueryDto = {
+      ...query,
+      busId: req.user.busId,
+    };
     return this.tripsService.getBusTripSummary(req.user.companyId, q);
   }
 
@@ -73,7 +81,23 @@ export class CrewDutyController {
     @Param('tripId') tripId: string,
     @Body() dto: CreateExtraIncomeDto,
   ) {
-    return this.crewDutyService.addExtraIncome(tripId, req.user.companyId, dto);
+    return this.crewDutyService.addExtraIncome(req.user.busId, tripId, req.user.companyId, dto);
+  }
+
+  @Patch('trips/:tripId/extra-incomes/:entryId')
+  updateExtraIncome(
+    @Req() req: { user: CrewDutySession },
+    @Param('tripId') tripId: string,
+    @Param('entryId') entryId: string,
+    @Body() dto: CreateExtraIncomeDto,
+  ) {
+    return this.crewDutyService.updateExtraIncome(
+      req.user.busId,
+      req.user.companyId,
+      tripId,
+      entryId,
+      dto,
+    );
   }
 
   /** POST /crew-duty/trips/:tripId/expenses
@@ -85,6 +109,22 @@ export class CrewDutyController {
     @Body() dto: CreateCrewTripExpenseDto,
   ) {
     return this.crewDutyService.addTripExpense(req.user.busId, req.user.companyId, tripId, dto);
+  }
+
+  @Patch('trips/:tripId/expenses/:entryId')
+  updateTripExpense(
+    @Req() req: { user: CrewDutySession },
+    @Param('tripId') tripId: string,
+    @Param('entryId') entryId: string,
+    @Body() dto: CreateCrewTripExpenseDto,
+  ) {
+    return this.crewDutyService.updateTripExpense(
+      req.user.busId,
+      req.user.companyId,
+      tripId,
+      entryId,
+      dto,
+    );
   }
 
   /** POST /crew-duty/trips/:tripId/end

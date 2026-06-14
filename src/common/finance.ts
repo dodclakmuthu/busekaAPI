@@ -25,6 +25,7 @@ export function normalizeExpenseCategory(input: string): ExpenseCategory {
     case 'parking':
       return 'PARKING';
     case 'meals':
+    case 'meal':
     case 'meal_allowance':
     case 'meal-allowance':
       return 'MEAL_ALLOWANCE';
@@ -73,6 +74,7 @@ export function normalizeExtraIncomeCategory(input: string): ExtraIncomeCategory
       return 'BAGGAGE';
     case 'other_extra_income':
     case 'other-extra-income':
+    case 'other_income':
     case 'other':
       return 'OTHER';
   }
