@@ -260,6 +260,11 @@ export class CrewDutyService {
     });
 
     const now = new Date();
+    const startTime = dto.startTime ? new Date(dto.startTime) : now;
+    if (Number.isNaN(startTime.getTime())) {
+      throw new BadRequestException('Invalid startTime');
+    }
+
     const trip = await this.prisma.trip.create({
       data: {
         companyId,
@@ -272,6 +277,7 @@ export class CrewDutyService {
         startStopId: dto.startStopId ?? null,
         driverStaffId: resolvedDriverId,
         conductorStaffId: resolvedConductorId,
+        startTime,
         startedAt: now,
         status: 'IN_PROGRESS',
         createdVia: 'crew_duty_app',
@@ -281,6 +287,7 @@ export class CrewDutyService {
         tripNumber: true,
         status: true,
         direction: true,
+        startTime: true,
         startedAt: true,
         driverStaffId: true,
         conductorStaffId: true,
@@ -301,6 +308,7 @@ export class CrewDutyService {
         tripNumber: trip.tripNumber,
         status: trip.status,
         direction: trip.direction,
+        startTime: trip.startTime?.toISOString() ?? null,
         startedAt: trip.startedAt?.toISOString() ?? null,
         driverStaffId: trip.driverStaffId,
         conductorStaffId: trip.conductorStaffId,
@@ -309,34 +317,36 @@ export class CrewDutyService {
   }
 
   // ── Extra Incomes ───────────────────────────────────────────────
-  async addExtraIncome(tripId: string, companyId: string, dto: CreateExtraIncomeDto) {
-    // ensure trip exists and belongs to company
-    const trip = await this.prisma.trip.findFirst({ where: { id: tripId, companyId }, select: { id: true } });
+  async addExtraIncome(busId: string, tripId: string, companyId: string, dto: CreateExtraIncomeDto) {
+    const trip = await this.prisma.trip.findFirst({
+      where: { id: tripId, companyId, busId },
+      select: { id: true },
+    });
     if (!trip) throw new NotFoundException('Trip not found');
 
-    const amountNum = Number(dto.amount);
-    if (!isFinite(amountNum) || amountNum <= 0) {
-      throw new BadRequestException('Amount must be a positive number');
-    }
-
-    const extra = await this.prisma.extraIncome.create({
-      data: {
-        tripId,
-        category: dto.category as any,
-        amount: dto.amount,
-        note: dto.note?.trim() ?? null,
-        enteredByType: 'crew_duty_app',
-      },
-      select: {
-        id: true,
-        category: true,
-        amount: true,
-        note: true,
-        createdAt: true,
-      },
+    return this.tripsService.addExtraIncome(companyId, tripId, {
+      ...dto,
+      amount: Number(dto.amount),
     });
+  }
 
-    return { extraIncome: extra };
+  async updateExtraIncome(
+    busId: string,
+    companyId: string,
+    tripId: string,
+    entryId: string,
+    dto: CreateExtraIncomeDto,
+  ) {
+    const trip = await this.prisma.trip.findFirst({
+      where: { id: tripId, companyId, busId },
+      select: { id: true },
+    });
+    if (!trip) throw new NotFoundException('Trip not found');
+
+    return this.tripsService.updateExtraIncome(companyId, tripId, entryId, {
+      ...dto,
+      amount: Number(dto.amount),
+    });
   }
 
   async listTripIncomes(tripId: string, companyId: string) {
@@ -361,6 +371,22 @@ export class CrewDutyService {
 
     // Reuse the dashboard TripsService logic for validation + category normalization.
     return this.tripsService.addExpense(companyId, tripId, dto);
+  }
+
+  async updateTripExpense(
+    busId: string,
+    companyId: string,
+    tripId: string,
+    entryId: string,
+    dto: CreateCrewTripExpenseDto,
+  ) {
+    const trip = await this.prisma.trip.findFirst({
+      where: { id: tripId, companyId, busId },
+      select: { id: true },
+    });
+    if (!trip) throw new NotFoundException('Trip not found');
+
+    return this.tripsService.updateExpense(companyId, tripId, entryId, dto);
   }
 
   // ── End Trip (Crew) ────────────────────────────────────────────

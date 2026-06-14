@@ -99,6 +99,7 @@ export class TripsService {
         endStopId: true,
         driverStaffId: true,
         conductorStaffId: true,
+        startTime: true,
         startedAt: true,
         endedAt: true,
         status: true,
@@ -124,7 +125,8 @@ export class TripsService {
       tripNumber: t.tripNumber,
       startPointId: t.startStopId ?? '',
       endPointId: t.endStopId ?? null,
-      startTime: t.startedAt ? formatHHMMInSriLanka(t.startedAt) : '',
+      startTime: (t.startTime ?? t.startedAt) ? formatHHMMInSriLanka(t.startTime ?? t.startedAt!) : '',
+      startedAt: t.startedAt?.toISOString() ?? null,
       endTime: t.endedAt ? formatHHMMInSriLanka(t.endedAt) : null,
       status: mapTripStatus(t.status),
       income: incomeSums[t.id] ?? 0,
@@ -180,6 +182,7 @@ export class TripsService {
           endStopId: true,
           driverStaffId: true,
           conductorStaffId: true,
+          startTime: true,
           startedAt: true,
           endedAt: true,
           status: true,
@@ -201,6 +204,7 @@ export class TripsService {
           endStopId: true,
           driverStaffId: true,
           conductorStaffId: true,
+          startTime: true,
           startedAt: true,
           endedAt: true,
           status: true,
@@ -230,7 +234,8 @@ export class TripsService {
       tripNumber: t.tripNumber,
       startPointId: t.startStopId ?? '',
       endPointId: t.endStopId ?? null,
-      startTime: t.startedAt ? formatHHMMInSriLanka(t.startedAt) : '',
+      startTime: (t.startTime ?? t.startedAt) ? formatHHMMInSriLanka(t.startTime ?? t.startedAt!) : '',
+      startedAt: t.startedAt?.toISOString() ?? null,
       endTime: t.endedAt ? formatHHMMInSriLanka(t.endedAt) : null,
       status: mapTripStatus(t.status),
       income: incomeSums[t.id] ?? 0,
@@ -265,6 +270,7 @@ export class TripsService {
             id: activeTrip.id,
             tripNumber: activeTrip.tripNumber,
             status: mapTripStatus(activeTrip.status),
+            startTime: activeTrip.startTime?.toISOString() ?? null,
             startedAt: activeTrip.startedAt?.toISOString() ?? null,
           }
         : null,
@@ -403,6 +409,11 @@ export class TripsService {
     });
 
     const now = new Date();
+    const startTime = dto.startTime ? new Date(dto.startTime) : now;
+    if (Number.isNaN(startTime.getTime())) {
+      throw new BadRequestException('Invalid startTime');
+    }
+
     const trip = await this.prisma.trip.create({
       data: {
         companyId,
@@ -416,6 +427,7 @@ export class TripsService {
         endStopId: dto.endStopId ?? null,
         driverStaffId: resolvedDriverId,
         conductorStaffId: resolvedConductorId,
+        startTime,
         startedAt: now,
         status: 'IN_PROGRESS',
         createdVia: 'dashboard',
@@ -429,6 +441,7 @@ export class TripsService {
         endStopId: true,
         driverStaffId: true,
         conductorStaffId: true,
+        startTime: true,
         startedAt: true,
         status: true,
       },
@@ -452,7 +465,8 @@ export class TripsService {
         tripNumber: trip.tripNumber,
         startPointId: trip.startStopId ?? '',
         endPointId: trip.endStopId ?? null,
-        startTime: trip.startedAt ? formatHHMMInSriLanka(trip.startedAt) : '',
+        startTime: (trip.startTime ?? trip.startedAt) ? formatHHMMInSriLanka(trip.startTime ?? trip.startedAt!) : '',
+        startedAt: trip.startedAt?.toISOString() ?? null,
         endTime: null,
         status: mapTripStatus(trip.status),
         income: 0,
@@ -480,6 +494,52 @@ export class TripsService {
         amount: new Prisma.Decimal(amount),
         note: dto.note?.trim() ?? null,
         enteredByType: 'dashboard',
+      },
+      select: {
+        id: true,
+        tripId: true,
+        expenseCategory: true,
+        amount: true,
+        note: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      expense: {
+        id: expense.id,
+        tripId: expense.tripId,
+        category: mapExpenseCategoryToDashboard(expense.expenseCategory),
+        amount: decimalToNumber(expense.amount),
+        note: expense.note ?? null,
+        timestamp: expense.createdAt.toISOString(),
+      },
+    };
+  }
+
+  async updateExpense(
+    companyId: string,
+    tripId: string,
+    entryId: string,
+    dto: CreateTripExpenseDto,
+  ) {
+    const existing = await this.prisma.tripExpense.findFirst({
+      where: { id: entryId, tripId, trip: { companyId } },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException('Expense not found');
+
+    const amount = Number(dto.amount);
+    if (!isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Amount must be a positive number');
+    }
+
+    const expense = await this.prisma.tripExpense.update({
+      where: { id: entryId },
+      data: {
+        expenseCategory: normalizeExpenseCategory(dto.category),
+        amount: new Prisma.Decimal(amount),
+        note: dto.note?.trim() ?? null,
       },
       select: {
         id: true,
@@ -548,6 +608,52 @@ export class TripsService {
     };
   }
 
+  async updateExtraIncome(
+    companyId: string,
+    tripId: string,
+    entryId: string,
+    dto: CreateExtraIncomeDto,
+  ) {
+    const existing = await this.prisma.extraIncome.findFirst({
+      where: { id: entryId, tripId, trip: { companyId } },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException('Extra income not found');
+
+    const amount = Number(dto.amount);
+    if (!isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('Amount must be a positive number');
+    }
+
+    const extra = await this.prisma.extraIncome.update({
+      where: { id: entryId },
+      data: {
+        category: normalizeExtraIncomeCategory(dto.category),
+        amount: new Prisma.Decimal(amount),
+        note: dto.note?.trim() ?? null,
+      },
+      select: {
+        id: true,
+        tripId: true,
+        category: true,
+        amount: true,
+        note: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      extraIncome: {
+        id: extra.id,
+        tripId: extra.tripId,
+        category: mapExtraIncomeCategoryToDashboard(extra.category),
+        amount: decimalToNumber(extra.amount),
+        note: extra.note ?? null,
+        timestamp: extra.createdAt.toISOString(),
+      },
+    };
+  }
+
   async endTrip(companyId: string, tripId: string, dto: EndTripDto) {
     const trip = await this.prisma.trip.findFirst({
       where: { id: tripId, companyId },
@@ -586,6 +692,7 @@ export class TripsService {
           endStopId: true,
           driverStaffId: true,
           conductorStaffId: true,
+          startTime: true,
           startedAt: true,
           endedAt: true,
           status: true,
@@ -648,7 +755,8 @@ export class TripsService {
         tripNumber: updated.tripNumber,
         startPointId: updated.startStopId ?? '',
         endPointId: updated.endStopId ?? null,
-        startTime: updated.startedAt ? formatHHMMInSriLanka(updated.startedAt) : '',
+        startTime: (updated.startTime ?? updated.startedAt) ? formatHHMMInSriLanka(updated.startTime ?? updated.startedAt!) : '',
+        startedAt: updated.startedAt?.toISOString() ?? null,
         endTime: updated.endedAt ? formatHHMMInSriLanka(updated.endedAt) : null,
         status: mapTripStatus(updated.status),
         income: amount,

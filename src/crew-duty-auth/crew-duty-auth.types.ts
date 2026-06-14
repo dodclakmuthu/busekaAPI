@@ -8,10 +8,12 @@ export type CrewDutyJwtPayload = {
   busId: string;
   companyId: string;
   registrationNumber: string;
+  sessionId?: string;
 };
 
 export type CrewDutySession = {
   busId: string;
   companyId: string;
   registrationNumber: string;
+  sessionId?: string;
 };

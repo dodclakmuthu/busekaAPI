@@ -1,15 +1,9 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
-
-export enum ExtraIncomeCategoryDto {
-  PARCEL = 'PARCEL',
-  BAGGAGE = 'BAGGAGE',
-  OTHER = 'OTHER',
-}
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateExtraIncomeDto {
   @IsNotEmpty()
-  @IsEnum(ExtraIncomeCategoryDto)
-  category!: ExtraIncomeCategoryDto;
+  @IsString()
+  category!: string;
 
   /** Amount as string (decimal) to avoid float precision issues in transport */
   @IsNotEmpty()
