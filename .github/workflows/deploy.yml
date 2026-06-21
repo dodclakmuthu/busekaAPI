@@ -25,4 +25,4 @@ jobs:
 
       - name: Run deploy script
         run: |
-          ssh ubuntu@35.154.87.228 'bash /var/www/devapi-buseka.lk/deploy.sh'
+          ssh ubuntu@35.154.87.228 'bash /var/www/buseka-api/deploy.sh'
