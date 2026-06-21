@@ -10,6 +10,7 @@ const productionAllowedHosts = new Set([
   'buseka.lk',
   'www.buseka.lk',
   'dashboard.buseka.lk',
+  'crew.buseka.lk'
 ]);
 
 function isAllowedDevOrigin(origin: string): boolean {
