@@ -1,4 +1,5 @@
 import { Controller, Get, InternalServerErrorException } from '@nestjs/common';
+import { UserAccountStatus } from '@prisma/client';
 import { PrismaService } from './prisma/prisma.service';
 
 @Controller()
@@ -34,5 +35,42 @@ export class AppController {
   @Get('/test-db')
   async testDb() {
     return this.health();
+  }
+
+  @Get('/landing/stats')
+  async landingStats() {
+    const [
+      busesRegistered,
+      companies,
+      activeUsers,
+      tripsRecorded,
+      incomeSummary,
+    ] = await Promise.all([
+      this.prisma.bus.count({ where: { isActive: true } }),
+      this.prisma.company.count({ where: { isActive: true } }),
+      this.prisma.user.count({
+        where: {
+          isActive: true,
+          status: UserAccountStatus.ACTIVE,
+        },
+      }),
+      this.prisma.trip.count(),
+      this.prisma.dailySummary.aggregate({
+        _sum: {
+          totalIncome: true,
+        },
+      }),
+    ]);
+
+    const totalIncome = incomeSummary._sum.totalIncome ? Number(incomeSummary._sum.totalIncome) : 0;
+
+    return {
+      busesRegistered,
+      companies,
+      activeUsers,
+      tripsRecorded,
+      totalIncome,
+      totalRevenue: totalIncome,
+    };
   }
 }

@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsISO8601, IsOptional, IsUUID } from 'class-validator';
 
 export enum TripDirectionDto {
   UP = 'UP',
@@ -30,4 +30,9 @@ export class StartTripDto {
   @IsOptional()
   @IsUUID()
   startStopId?: string;
+
+  /** Conductor-entered trip time. startedAt is still set by the system. */
+  @IsOptional()
+  @IsISO8601()
+  startTime?: string;
 }

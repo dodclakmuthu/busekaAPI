@@ -387,6 +387,8 @@ model Bus {
   conductorPercentage  Decimal?  @db.Decimal(5, 2)
   fixedDriverWage      Decimal?  @db.Decimal(12, 2)
   fixedConductorWage   Decimal?  @db.Decimal(12, 2)
+  crewDutySessionId        String?
+  crewDutySessionExpiresAt DateTime?
   isActive           Boolean   @default(true)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -408,6 +410,7 @@ model Bus {
   @@index([status])
   @@index([defaultDriverStaffId])
   @@index([defaultConductorStaffId])
+  @@index([crewDutySessionId])
   @@index([isActive])
   @@schema("busapp")
 }
@@ -527,6 +530,7 @@ model Trip {
   endStopId        String?
   driverStaffId    String?
   conductorStaffId String?
+  startTime        DateTime?
   startedAt        DateTime?
   endedAt          DateTime?
   status           TripStatus     @default(NOT_STARTED)

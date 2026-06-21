@@ -5,9 +5,25 @@ import { NestFactory } from '@nestjs/core';
 import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 
+const productionAllowedHosts = new Set([
+  'admin.buseka.lk',
+  'buseka.lk',
+  'www.buseka.lk',
+  'dashboard.buseka.lk',
+]);
+
 function isAllowedDevOrigin(origin: string): boolean {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
     || /^https?:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/i.test(origin);
+}
+
+function isAllowedProductionOrigin(origin: string): boolean {
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === 'https:' && productionAllowedHosts.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
 }
 
 async function bootstrap() {
@@ -33,7 +49,11 @@ async function bootstrap() {
       }
 
       if (isProduction) {
-        callback(new Error(`CORS: origin ${origin} not allowed`));
+        if (isAllowedProductionOrigin(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`CORS: origin ${origin} not allowed`));
+        }
         return;
       }
 
